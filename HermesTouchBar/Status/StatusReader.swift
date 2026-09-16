@@ -1,11 +1,13 @@
 // StatusReader.swift
 // Pulls a HermesStatus snapshot from ~/.hermes/state.db, jobs.json, gateway.pid.
 //
-// Strategy:
-//   1. open SQLite readonly (cheap; Hermes holds the write lock briefly).
-//   2. read latest 10 messages of the most recent session, plus model/session info.
-//   3. read ~/.hermes/cron/jobs.json mtime to detect "just fired" jobs.
-//   4. read gateway.pid + check liveness via kill(pid, 0).
+// Tier B: pure function, no own timer, no cached snapshot, no shared DB
+// handle. `refresh()` opens a fresh readonly connection per call and closes
+// it, so it is thread-safe and callable from any queue — AppDelegate calls
+// it on a background queue so the main runloop never does SQLite I/O
+// (previously the built-in 1.5s timer ran the queries on the main thread
+// and could stall Touch Bar repaints).
+//
 // Errors degrade to .empty; never crash the menu-bar app.
 
 import Foundation
@@ -14,29 +16,10 @@ import SQLite3
 final class StatusReader {
 
     private let hermesHome: URL
-    private var db: OpaquePointer?
-    private var lastDbMtime: Date = .distantPast
-    private var timer: Timer?
-    private(set) var snapshot: HermesStatus = .empty
 
     init(hermesHome: URL = StatusReader.defaultHome()) {
         self.hermesHome = hermesHome
-        openDB()
     }
-
-    deinit { sqlite3_close(db) }
-
-    // MARK: - Lifecycle
-    func start() {
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
-        timer?.tolerance = 0.3
-        RunLoop.main.add(timer!, forMode: .common)
-    }
-
-    func stop() { timer?.invalidate(); timer = nil }
 
     // MARK: - Default Hermes home
     static func defaultHome() -> URL {
@@ -45,38 +28,28 @@ final class StatusReader {
         return URL(fileURLWithPath: NSString("~/.hermes").expandingTildeInPath)
     }
 
-    // MARK: - Refresh
-    private func refresh() {
-        let dbURL = hermesHome.appendingPathComponent("state.db")
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: dbURL.path),
-           let mtime = attrs[.modificationDate] as? Date,
-           mtime > lastDbMtime {
-            lastDbMtime = mtime
-            // Reopen to pick up new schema / WAL checkpoints
-            sqlite3_close(db); db = nil
-            openDB()
-        }
-        snapshot = collect()
-    }
-
-    private func openDB() {
+    // MARK: - Refresh (pure; thread-safe; call on a background queue)
+    /// Read a fresh snapshot. Each call opens its own readonly connection
+    /// (cheap, WAL-safe) and closes it, so there is no shared mutable state.
+    func refresh() -> HermesStatus {
+        var db: OpaquePointer?
         let path = hermesHome.appendingPathComponent("state.db").path
-        var handle: OpaquePointer?
-        if sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
-            db = handle
-        } else {
-            db = nil
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else {
+            return .empty
         }
+        defer { sqlite3_close(db) }
+        return collect(db: db)
     }
 
     // MARK: - Collect
-    private func collect() -> HermesStatus {
+    private func collect(db: OpaquePointer?) -> HermesStatus {
         let now = Date()
         let model = readConfigModel()
         let provider = readConfigProvider()
         let gatewayUp = checkGateway()
         let cronRecently = checkCronFired()
-        let (session, msgs, ctx, finish) = readSession()
+        let (session, msgs, ctx, finish) = readSession(db: db)
         let (lastReasoning, lastTool, lastUser, lastAssistant) = timestamps(msgs)
         let lastError = lastErrorMessage(in: msgs)
         let waiting = checkApproval(in: msgs)
@@ -109,7 +82,7 @@ final class StatusReader {
     // MARK: - Read helpers
     private struct SessionInfo { let id: String; let source: String; let model: String?; let title: String? }
 
-    private func readSession() -> (SessionInfo?, [RecentMessage], (used: Int, max: Int), String?) {
+    private func readSession(db: OpaquePointer?) -> (SessionInfo?, [RecentMessage], (used: Int, max: Int), String?) {
         guard let db else { return (nil, [], (0, 0), nil) }
         // Most recently active session
         var session: SessionInfo?
@@ -133,7 +106,7 @@ final class StatusReader {
                 // Crude context max: 200k default for Anthropic, 128k for most others
                 let max = model.lowercased().contains("opus") || model.lowercased().contains("gpt-4") ? 200_000 : 128_000
                 sqlite3_finalize(stmt); stmt = nil
-                let msgs = readRecentMessages(sessionId: id, limit: 10)
+                let msgs = readRecentMessages(db: db, sessionId: id, limit: 10)
                 let lastFinish = msgs.last(where: { $0.role == "assistant" })?.finishReason
                 return (session, msgs, (used, max), lastFinish)
             }
@@ -142,7 +115,7 @@ final class StatusReader {
         return (nil, [], (0, 0), nil)
     }
 
-    private func readRecentMessages(sessionId: String, limit: Int) -> [RecentMessage] {
+    private func readRecentMessages(db: OpaquePointer?, sessionId: String, limit: Int) -> [RecentMessage] {
         guard let db else { return [] }
         var out: [RecentMessage] = []
         let sql = """

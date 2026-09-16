@@ -28,6 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `.ready` (wire says up) and `.gatewayDown` (sqlite says down).
     private var lastWire: HermesWireStatus?
 
+    /// Tier B — most recent StatusReader snapshot, refreshed on a
+    /// background queue ONLY while the wire is stale/dead. The wire path
+    /// uses it as the sqlite fallback for fields Python doesn't emit.
+    /// Previously StatusReader ran its own 1.5s timer doing SQLite I/O on
+    /// the main runloop (could stall Touch Bar repaints).
+    private var lastSqliteSnapshot: HermesStatus?
+
     /// Tier B — user-pinned session. When set, the Touch Bar follows
     /// this session's data instead of "most recently active". Cleared
     /// by the picker when the user picks "show all / most recent".
@@ -86,10 +93,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //    StatusReader-only path. The Swift side never blocks on Python.
         startWireSource()
 
-        // 5) StatusReader keeps running for activity timestamps (tool
-        //    calls, reasoning, finish reasons) that the Python feed
-        //    doesn't expose yet. Tier A.2 will move these into the wire.
-        statusReader.start()
+        // 5) Tier B — StatusReader is a pure function with no own timer;
+        //    the backup timer below refreshes it on a background queue only
+        //    when the wire is stale/dead. The first timer tick seeds
+        //    lastSqliteSnapshot. (Previously StatusReader ran SQLite queries
+        //    on the main runloop every 1.5s and could stall repaints.)
 
         // 6) Install the system-modal Touch Bar.
         touchBarController.install()
@@ -116,7 +124,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTimer?.invalidate()
         wireTask?.cancel()
         quickActions.unregister()
-        statusReader.stop()
         Task { await wireSource.stop() }
         skinProvider.stopWatching()
         touchBarController.uninstall()
@@ -250,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Tier B: pick which session to display (pinned wins; else most
         // recent). Shared with the timer path so both always agree.
         let displaySession = resolveDisplaySession(wire)
-        let merged = merge(wire: wire, sqlite: statusReader.snapshot,
+        let merged = merge(wire: wire, sqlite: lastSqliteSnapshot ?? .empty,
                            displaySession: displaySession)
         let state = stateMachine.evaluate(snapshot: merged)
         touchBarController.update(state: state, snapshot: merged)
@@ -369,14 +376,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // displaySession comes from the same resolver as the wire path so
         // a pinned session can never make the two paths diverge.
         // If the wire has never delivered a frame (e.g. Python missing),
-        // fall back to whatever StatusReader last saw.
+        // fall back to the most recent background StatusReader snapshot.
         if let wire = lastWire {
-            let merged = merge(wire: wire, sqlite: statusReader.snapshot,
+            let merged = merge(wire: wire, sqlite: lastSqliteSnapshot ?? .empty,
                                displaySession: resolveDisplaySession(wire))
             debugModelTrace("timer", merged)
             return merged
         }
-        return statusReader.snapshot
+        return lastSqliteSnapshot ?? .empty
     }
 
     private func refreshMenuStateLabel(state: HermesState) {
@@ -388,13 +395,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Backup timer (fires regardless of wire health)
-
+    //
+    // Tier B single-driver rule: at any moment the UI is repainted by
+    // exactly one source — the wire frames (0.5s cadence, main actor) while
+    // the Python feed is alive, or this timer (1.5s) with a background
+    // StatusReader.refresh() while it is stale/dead. The wire frames drive
+    // `handleWire`; this timer does NOT repaint when the wire is fresh —
+    // it only watches for staleness and becomes the driver on fallback.
     private func scheduleTimer() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             guard let self else { return }
-            let snapshot = self.currentMergedSnapshot()
-            let state = self.stateMachine.evaluate(snapshot: snapshot)
-            self.touchBarController.update(state: state, snapshot: snapshot)
+            // Wire fresh? frames already drive the UI; this timer is idle.
+            let wireStale: Bool
+            if let wire = self.lastWire {
+                wireStale = Date().timeIntervalSince1970 - wire.ts > 3.0
+            } else {
+                wireStale = true
+            }
+            guard wireStale else { return }
+
+            // Wire dead/stale → SQLite fallback, off the main thread so the
+            // runloop never blocks on queries (Touch Bar repaint stays smooth).
+            DispatchQueue.global().async { [weak self] in
+                guard let self else { return }
+                let sqlite = self.statusReader.refresh()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.lastSqliteSnapshot = sqlite
+                    // Merge through lastWire when we ever had a frame (so
+                    // gateway stays sourced from the wire, not kill-0), and
+                    // only fall back to the pure sqlite snapshot when the
+                    // wire never delivered anything.
+                    let snapshot = self.currentMergedSnapshot()
+                    let state = self.stateMachine.evaluate(snapshot: snapshot)
+                    self.touchBarController.update(state: state, snapshot: snapshot)
+                    self.refreshMenuStateLabel(state: state)
+                }
+            }
         }
         refreshTimer?.tolerance = 0.3
     }
