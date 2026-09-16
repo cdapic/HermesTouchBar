@@ -16,7 +16,11 @@ Stdout contract (line-delimited JSON; one object per line):
         "id": "...", "source": "...", "model": "...",
         "started_at": ..., "last_active": ...
       } | null,
-      "state": null,        # Tier A.3 — Hermes-side state, optional
+      "state": "working",  # Tier A.3 — Hermes-authoritative state derived from
+                           # the session tail + live heartbeat (idle/ready/
+                           # thinking/working/streaming/ok/error); null when
+                           # Hermes is unreachable (Swift falls back to its
+                           # own time-window heuristics)
       "approval": {
         "pending": false, "prompt": null, "tool": null
       },
@@ -148,6 +152,74 @@ def _read_cron_last_fired() -> tuple[float | None, str | None]:
         return (None, None)
 
 
+# Finish-reason values that mark the turn as ended in a provider or agent
+# error (mirrors _ERROR_FINISH_REASONS in hermes_state.py).
+_ERROR_FINISH_REASONS = frozenset({"error", "agent_error", "content_filter"})
+
+
+def _derive_state(
+    messages: list[dict[str, Any]],
+    last_activity_at: float | None,
+    now: float,
+    has_active_session: bool,
+) -> str | None:
+    """Derive the authoritative Hermes state from the active session's tail
+    (Tier A.3).
+
+    Mirrors Hermes' own classify_session_status semantics (hermes_state.py:
+    the LAST message's shape decides the lifecycle) plus DESIGN §2
+    thresholds:
+
+      assistant + error finish_reason  → error   (30s window)
+      assistant + tool_calls / finish  → working (5s)
+      assistant + finish=stop          → ok      (12s)
+      assistant + reasoning            → thinking(5s)
+      assistant + NULL finish_reason   → streaming (8s) — the model is still
+                                         emitting; Hermes writes assistant rows
+                                         in real time (69 NULL-finish rows in
+                                         state.db), so a NULL finish on the
+                                         last row means output is in flight.
+      tool as the last row             → working (5s) — result just landed,
+                                         agent is consuming it.
+      user as the last row             → ready — waiting for input.
+
+    The age used for window decay comes from the session's live
+    last_activity_at heartbeat (Hermes refreshes it while the agent is
+    active), NOT the last message's timestamp, so a long-running response
+    doesn't wrongly decay to ready. Returns None only when the caller has
+    no session-level evidence (empty list, no activity).
+    """
+    if not messages:
+        return "ready" if has_active_session else "idle"
+    last = messages[-1]
+    role = (last.get("role") or "").strip().lower()
+    finish = ((last.get("finish_reason") or "").strip().lower() or None)
+    has_tool = bool(last.get("tool_calls"))
+    has_reasoning = bool(last.get("reasoning") or last.get("reasoning_content"))
+    age = (now - float(last_activity_at)) if isinstance(last_activity_at, (int, float)) else None
+
+    def decay(window: float, state: str) -> str:
+        if age is None or age < window:
+            return state
+        return "ready" if has_active_session else "idle"
+
+    if role == "assistant":
+        if finish in _ERROR_FINISH_REASONS:
+            return decay(30.0, "error")
+        if finish == "tool_calls" or has_tool:
+            return decay(5.0, "working")
+        if finish == "stop":
+            return decay(12.0, "ok")
+        if has_reasoning:
+            return decay(5.0, "thinking")
+        return decay(8.0, "streaming")
+    if role == "tool":
+        return decay(5.0, "working")
+    if role == "user":
+        return "ready"
+    return "ready" if has_active_session else "idle"
+
+
 def _read_pending_approval() -> dict[str, Any]:
     """Detect a pending approval from ~/.hermes/approvals/*.json.
 
@@ -241,6 +313,12 @@ def _collect() -> dict[str, Any]:
         #     the user pick one to pin. Plus `session_count` for the
         #     header chrome.
         all_sessions: list[dict[str, Any]] = []
+        # Pre-initialize so a session-listing exception can't leave these
+        # undefined and NameError the frame (the loop would then emit
+        # nothing instead of a degraded frame).
+        context_tokens: int | None = None
+        context_max: int | None = None
+        derived_state: str | None = None
         try:
             db = SessionDB()
             try:
@@ -284,6 +362,11 @@ def _collect() -> dict[str, Any]:
                         "model": s.get("model"),
                         "started_at": s.get("started_at"),
                         "last_active": s.get("last_active"),
+                        # Live heartbeat — refreshed while the agent is
+                        # active. Drives the state-window decay in
+                        # _derive_state so a long response doesn't drop to
+                        # ready mid-stream.
+                        "last_activity_at": s.get("last_activity_at") or s.get("last_active"),
                         # TUI/CLI sessions carry a human-readable title
                         # (e.g. "评审Matrix看板widget方案"); gateway sessions
                         # may not. Swift falls back to source+id when empty.
@@ -318,7 +401,8 @@ def _collect() -> dict[str, Any]:
                         # still returns chronologically ordered rows, so the
                         # "last processed = newest" rule in HermesWireActivity
                         # keeps working.
-                        for m in db.get_messages(sid, limit=5, latest=True):
+                        tail = db.get_messages(sid, limit=5, latest=True) or []
+                        for m in tail:
                             recent_messages.append({
                                 "role": m.get("role"),
                                 "timestamp": m.get("timestamp"),
@@ -329,14 +413,22 @@ def _collect() -> dict[str, Any]:
                                     and m.get("role") == "assistant"
                                 ),
                             })
+                        # Tier A.3 — authoritative state derived from the
+                        # session tail + live heartbeat. `tail` holds the
+                        # FULL message rows (incl. tool_calls / reasoning),
+                        # so no extra query is needed.
+                        derived_state = _derive_state(
+                            tail,
+                            top.get("last_activity_at"),
+                            time.time(),
+                            True,
+                        )
                         # Context usage — Hermes exposes no persisted "current
                         # window" counter (sessions.input_tokens is CUMULATIVE
                         # and was misused before → showed ~70% for a 2% real
                         # window). Replicate Hermes' own estimator on the live
                         # active messages so the % matches what Hermes itself
                         # reports (user: "ctx 只使用了 2%" was correct).
-                        context_tokens: int | None = None
-                        context_max: int | None = None
                         try:
                             from agent.model_metadata import (  # type: ignore
                                 estimate_request_tokens_rough,
@@ -361,8 +453,10 @@ def _collect() -> dict[str, Any]:
                             pass
                     else:
                         context_tokens, context_max = None, None
+                        derived_state = _derive_state([], None, time.time(), True)
                 else:
                     context_tokens, context_max = None, None
+                    derived_state = _derive_state([], None, time.time(), False)
             finally:
                 db.close()
         except Exception as e:
@@ -378,7 +472,7 @@ def _collect() -> dict[str, Any]:
         # Tier B: every active session, not just the most recent.
         "sessions": all_sessions,
         "session_count": len(all_sessions),
-        "state": None,  # Tier A.3
+        "state": derived_state if _IMPORT_ERROR is None else None,  # Tier A.3
         "approval": _read_pending_approval(),
         "cron": {
             "last_fired_at": cron_last,

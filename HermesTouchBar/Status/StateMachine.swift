@@ -28,9 +28,21 @@ final class StateMachine {
             return current
         }
 
+        // 3. Tier A.3 — Hermes-authoritative state. When the Python wire
+        //    reports a state for the active session (derived from the
+        //    session tail + live heartbeat, mirroring Hermes' own
+        //    classify_session_status), trust it over local heuristics.
+        //    DESIGN §2: "Hermes 直接给的 state 是首要判定；时间窗退化只在
+        //    Hermes 流掉线 / 没有该字段时使用." Only gatewayDown and
+        //    waitingApproval (above) outrank it.
+        if let authoritative = snapshot.authoritativeState {
+            current = authoritative
+            return current
+        }
+
         let now = snapshot.now
 
-        // 3. Error in the recent past
+        // 4. Error in the recent past
         // D-3: lastErrorMessage is now a Date? directly (was String? parsed
         // via ISO8601DateFormatter round-trip before Tier D).
         if let lastErr = snapshot.lastErrorMessage,
@@ -39,7 +51,9 @@ final class StateMachine {
             return current
         }
 
-        // 4. Active session: work / think / stream
+        // 5. Active session: work / think / stream. This whole block is the
+        //    local fallback — Tier A.3 makes the wire's `state` authoritative,
+        //    so these heuristics only run when Python is down / state is nil.
         if let last = snapshot.lastAssistantMessageAt {
             let age = now.timeIntervalSince(last)
             if age < workingWindow {
@@ -53,11 +67,26 @@ final class StateMachine {
                     current = .thinking
                     return current
                 }
-                if let finish = snapshot.lastFinishReason, finish.isEmpty {
-                    current = .streaming
+                // DESIGN §2: the last assistant row's finish_reason decides
+                // the kind within the working window:
+                //   stop       → .ok    (completed; was misreported as
+                //                         .working before Tier A.3)
+                //   tool_calls → .working
+                //   NULL       → .streaming (model still emitting; was
+                //                         misreported as .working)
+                if let finish = snapshot.lastFinishReason {
+                    switch finish {
+                    case "stop":
+                        current = .ok
+                    case "tool_calls":
+                        current = .working
+                    default:
+                        // length / other terminal reasons → completed.
+                        current = .ok
+                    }
                     return current
                 }
-                current = .working
+                current = .streaming
                 return current
             }
             if age < streamingWindow, snapshot.lastFinishReason == nil {
@@ -70,13 +99,13 @@ final class StateMachine {
             }
         }
 
-        // 5. Cron fired in the last few seconds -> ready
+        // 6. Cron fired in the last few seconds -> ready
         if snapshot.cronRecentlyFired {
             current = .ready
             return current
         }
 
-        // 6. Default
+        // 7. Default
         current = snapshot.activeSessionId == nil ? .idle : .ready
         return current
     }

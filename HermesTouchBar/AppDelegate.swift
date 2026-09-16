@@ -341,6 +341,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lastToolCallAt:         derived.lastToolAt      ?? sqlite.lastToolCallAt,
             lastReasoningAt:        derived.lastReasoningAt ?? sqlite.lastReasoningAt,
             lastFinishReason:       derived.lastFinishReason ?? sqlite.lastFinishReason,
+            // Tier A.3 — Hermes-authoritative state. Python derives it from
+            // the active session's tail + live heartbeat; when present the
+            // StateMachine trusts it (only gatewayDown/waitingApproval
+            // override it locally).
+            authoritativeState:     wire.state?.toHermesState(),
             activeSessionId:        sessionId,
             activeSessionSource:    source,
             activeSessionModel:     model,

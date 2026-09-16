@@ -89,7 +89,27 @@ enum WireDecodeSmoke {
             check("decode full: \(error)", false)
         }
 
-        // 2b) HermesWireActivityTimestamps derivation from a synthetic frame.
+        // 2b) Tier A.3: wire `state` maps to HermesState via toHermesState().
+        let stateFrame = """
+        {"v":1,"ts":1.0,"gateway":{"running":true,"manager":"x","pids":[]},"session":{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0},"sessions":[{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0}],"session_count":1,"state":"working","approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[]}
+        """
+        do {
+            let wire = try HermesPythonSource.decoder.decode(
+                HermesWireStatus.self,
+                from: stateFrame.data(using: .utf8)!
+            )
+            check("decode state: wire.state == .working", wire.state == .working)
+            check("decode state: toHermesState() == .working",
+                  wire.state?.toHermesState() == .working)
+            check("decode state: HermesWireState.error maps to HermesState.error",
+                  HermesWireState.error.toHermesState() == .error)
+            check("decode state: HermesWireState.waitingApproval maps",
+                  HermesWireState.waitingApproval.toHermesState() == .waitingApproval)
+        } catch {
+            check("decode state: \(error)", false)
+        }
+
+        // 2c) HermesWireActivityTimestamps derivation from a synthetic frame.
         let tsFrame = """
         {"v":1,"ts":1.0,"gateway":{"running":true,"manager":"x","pids":[]},"session":{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0},"sessions":[{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0}],"session_count":1,"state":null,"approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[{"role":"user","timestamp":100.0,"tool_name":null,"finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":110.0,"tool_name":null,"finish_reason":"tool_calls","is_reasoning":true},{"role":"tool","timestamp":115.0,"tool_name":"shell","finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":120.0,"tool_name":null,"finish_reason":"error","is_reasoning":false}]}
         """

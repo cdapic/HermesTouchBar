@@ -12,6 +12,12 @@ struct HermesStatus {
     let lastToolCallAt: Date?
     let lastReasoningAt: Date?
     let lastFinishReason: String?
+    /// Tier A.3 — Hermes-authoritative state from the Python wire
+    /// (`_derive_state` in hermes_source.py: session tail + live heartbeat).
+    /// When present, StateMachine trusts it over local time-window
+    /// heuristics (only gatewayDown / waitingApproval override it). nil
+    /// means "I don't know" → local fallback.
+    let authoritativeState: HermesState?
     let activeSessionId: String?
     let activeSessionSource: String?
     let activeSessionModel: String?
@@ -32,6 +38,7 @@ struct HermesStatus {
     static let empty = HermesStatus(
         now: Date(), lastAssistantMessageAt: nil, lastUserMessageAt: nil,
         lastToolCallAt: nil, lastReasoningAt: nil, lastFinishReason: nil,
+        authoritativeState: nil,
         activeSessionId: nil, activeSessionSource: nil, activeSessionModel: nil,
         activeSessionTitle: nil,
         model: "—", provider: "—", contextTokens: 0, contextMax: 0,

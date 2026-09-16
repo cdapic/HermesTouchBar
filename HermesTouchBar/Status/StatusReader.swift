@@ -87,6 +87,9 @@ final class StatusReader {
             lastToolCallAt: lastTool,
             lastReasoningAt: lastReasoning,
             lastFinishReason: finish,
+            // Fallback path only — StatusReader has no Hermes-authoritative
+            // state; that comes exclusively from the Python wire.
+            authoritativeState: nil,
             activeSessionId: session?.id,
             activeSessionSource: session?.source,
             activeSessionModel: session?.model,

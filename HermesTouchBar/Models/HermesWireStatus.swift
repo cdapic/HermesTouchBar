@@ -78,6 +78,22 @@ enum HermesWireState: String, Codable {
     case idle, ready, thinking, working, streaming
     case waitingApproval = "waiting_approval"
     case ok, error
+
+    /// Wire state → the UI's HermesState. The wire has no `gatewayDown`
+    /// (that's a local inference from `gateway.running`), so the mapping is
+    /// total — every wire value has a UI counterpart.
+    func toHermesState() -> HermesState {
+        switch self {
+        case .idle:            return .idle
+        case .ready:           return .ready
+        case .thinking:        return .thinking
+        case .working:         return .working
+        case .streaming:       return .streaming
+        case .waitingApproval: return .waitingApproval
+        case .ok:              return .ok
+        case .error:           return .error
+        }
+    }
 }
 
 struct HermesWireApproval: Codable {
