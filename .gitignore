@@ -8,8 +8,7 @@ build/
 memory-bank/
 .claude/
 
-# Apple 官方文档副本（嵌入式仓库，70M，仅本地参考，不进 git）
-docs/CreatingAndCustomizingTheTouchBar/
+docs/
 
 # macOS
 .DS_Store
