@@ -3,8 +3,7 @@
 把 Hermes Agent 的运行状态实时投影到 MacBook Touch Bar —— 不抢占系统控制条，任意前台 App 下都常驻可见。
 
 [![macOS](https://img.shields.io/badge/macOS-13.0+-blue)](https://developer.apple.com/macos/)
-[![Platform](https://img.shields.io/badge/Platform-MacBook%20Pro%20with%20Touch%20Bar-lightgrey)](docs/DESIGN.md)
-![Build](https://img.shields.io/badge/Build-passing-brightgreen)
+[![Platform](https://img.shields.io/badge/Platform-MacBook%20Pro%20with%20Touch%20Bar-lightgrey)](#功能特性)
 
 > 适配硬件：MacBookPro16,1（2019 16 寸 Intel MacBook Pro，带 Touch Bar）
 > 依赖：Hermes Agent（`~/.hermes`）+ Python 3
@@ -111,8 +110,7 @@ HermesTouchBar/
 │   └── Status/                      # SQLite 兜底读取 + 状态机
 ├── screenshot/                      # 实机截图
 ├── scripts/                         # build.sh / test.sh
-├── tests/                           # standalone smoke 测试
-└── docs/DESIGN.md                   # 设计文档
+└── tests/                           # standalone smoke 测试
 ```
 
 > 无 `.xcodeproj`：构建走 `scripts/build.sh`（swiftc 直接编译），`project.yml` 为 XcodeGen 备用模板。
@@ -129,9 +127,13 @@ HermesTouchBar/
 
 ---
 
-## 文档
+## 致谢
 
-- [docs/DESIGN.md](docs/DESIGN.md) — 设计意图、状态机、数据通道、架构分层与路线图
+- [TouchBar-Pet](https://github.com/Heaaaaaaaa/TouchBar-Pet) — 私有 `DFRFoundation` 接入方案的早期参考
+
+## 反馈与贡献
+
+- 项目仍处快速迭代期，Bug / 体验问题 / 新想法：欢迎 [新建 Issue](../../issues/new)
 
 ## Roadmap
 
@@ -141,4 +143,4 @@ HermesTouchBar/
 
 ## License
 
-本项目仅供学习与个人使用，未选择开源许可证。
+本项目基于 [MIT License](./LICENSE) 开源。
