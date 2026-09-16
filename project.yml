@@ -1,0 +1,41 @@
+name: HermesTouchBar
+options:
+  bundleIdPrefix: local.hermes
+  deploymentTarget:
+    macOS: "13.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  HermesTouchBar:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: HermesTouchBar
+    info:
+      path: HermesTouchBar/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.hermes.touchbar
+        PRODUCT_NAME: HermesTouchBar
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: HermesTouchBar/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: ""
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+    linkerFlags:
+      - "-lsqlite3"
+    dependencies: []
+schemes:
+  HermesTouchBar:
+    build:
+      targets:
+        HermesTouchBar: all
+    run:
+      config: Release

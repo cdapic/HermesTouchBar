@@ -1,0 +1,24 @@
+# 示例皮肤：slate — 冷蓝开发者主题
+# 复制到 ~/.hermes/skins/slate.yaml 后用 `hermes skin use slate` 切换
+name: slate
+description: Cool blue — developer-focused
+colors:
+  background: "#0F172A"
+  ui_accent: "#7eb8f6"
+  banner_title: "#7eb8f6"
+  banner_text: "#c9d1d9"
+  ui_ok: "#63D0A6"
+  ui_error: "#F7A072"
+  ui_warn: "#e6a855"
+  ui_tool: "#7eb8f6"
+  ui_thinking: "#8EA8FF"
+  status_bar_bg: "#151C2F"
+  status_bar_text: "#C9D1D9"
+  status_bar_strong: "#7EB8F6"
+  status_bar_dim: "#5D6672"
+  status_bar_good: "#63D0A6"
+  status_bar_warn: "#E6A855"
+  status_bar_bad: "#F7A072"
+  status_bar_critical: "#FF7A7A"
+branding:
+  agent_name: Hermes Agent

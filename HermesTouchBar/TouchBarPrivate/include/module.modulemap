@@ -1,0 +1,5 @@
+module TouchBarPrivate {
+    header "TouchBarPrivate.h"
+    link "AppKit"
+    export *
+}
