@@ -13,7 +13,7 @@
 // selecting a builtin silently fell through to default because the synthesized
 // record had an empty `colors` dict.
 //
-// Palette source: /Users/dingan/.hermes/hermes-agent/hermes_cli/skin_engine.py
+// Palette source: `hermes-agent/hermes_cli/skin_engine.py`
 // Keep this file in sync when upstream adds/renames builtins.
 
 import Foundation

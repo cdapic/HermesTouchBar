@@ -199,10 +199,16 @@ actor HermesPythonSource {
         if let bundled = Bundle.main.url(forResource: "hermes_source", withExtension: "py") {
             return bundled.path
         }
-        // 2) Project-relative path (running from xcrun / swift run / dev)
-        let dev = "/Users/dingan/hermes_user_workspace/projects/HermesTouchBar/HermesTouchBar/Data/hermes_source.py"
-        if FileManager.default.fileExists(atPath: dev) {
-            return dev
+        // 2) Dev fallback: hermes_source.py is the sibling of this source file.
+        //    #file is resolved at compile time to the path passed to swiftc;
+        //    scripts/build.sh + scripts/test.sh both invoke swiftc from
+        //    PROJECT_DIR with relative paths, so the sibling lookup works
+        //    regardless of who cloned the repo or where it lives.
+        let sibling = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent()
+            .appendingPathComponent("hermes_source.py")
+        if FileManager.default.fileExists(atPath: sibling.path) {
+            return sibling.path
         }
         return nil
     }
