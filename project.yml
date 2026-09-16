@@ -1,41 +1,57 @@
+# XcodeGen project manifest — Tier E (test infrastructure).
+#
+# Generates HermesTouchBar.xcodeproj via:
+#   xcodegen generate
+# Then run the formal test target:
+#   xcodebuild test -project HermesTouchBar.xcodeproj -scheme HermesTouchBarTests \
+#     -destination 'platform=macOS'
+#
+# Scope note: this manifest covers the FORMAL TEST TARGET only — the pure-logic
+# sources (Skin/Status/Models/Data) + the XCTest ports in tests/unit. The app
+# itself still builds via scripts/build.sh (swiftc + the private-API ObjC
+# bridge), because the DFRFoundation/dlopen bridge doesn't fit an ordinary
+# Xcode app target yet. Keeping the test target free of AppDelegate /
+# TouchBarController means `xcodebuild test` never touches the private API.
+#
+# When the app target is eventually added to this manifest, the bridge should
+# move into a proper framework target first.
+
 name: HermesTouchBar
+
 options:
-  bundleIdPrefix: local.hermes
+  minimumXcodeGenVersion: "2.38.0"
   deploymentTarget:
     macOS: "13.0"
-settings:
-  base:
-    SWIFT_VERSION: "5.0"
-    MACOSX_DEPLOYMENT_TARGET: "13.0"
-    CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
-    DEVELOPMENT_TEAM: ""
-    ENABLE_HARDENED_RUNTIME: NO
+  createIntermediateGroups: true
+
 targets:
-  HermesTouchBar:
-    type: application
+  HermesTouchBarTests:
+    type: bundle.unit-test
     platform: macOS
-    deploymentTarget: "13.0"
     sources:
-      - path: HermesTouchBar
-    info:
-      path: HermesTouchBar/Info.plist
+      - tests/unit
+      - HermesTouchBar/Skin/SkinProvider.swift
+      - HermesTouchBar/Status/StatusReader.swift
+      - HermesTouchBar/Status/StateMachine.swift
+      - HermesTouchBar/Models/State.swift
+      - HermesTouchBar/Models/HermesWireStatus.swift
+      - HermesTouchBar/Models/HermesWireActivity.swift
+      - HermesTouchBar/Data/HermesPythonSource.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: local.hermes.touchbar
-        PRODUCT_NAME: HermesTouchBar
-        GENERATE_INFOPLIST_FILE: NO
-        INFOPLIST_FILE: HermesTouchBar/Info.plist
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_ENTITLEMENTS: ""
-        SWIFT_OBJC_BRIDGING_HEADER: ""
-    linkerFlags:
-      - "-lsqlite3"
-    dependencies: []
+        PRODUCT_BUNDLE_IDENTIFIER: com.hermestouchbar.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        # Tests run locally; no signing needed for a unit-test bundle.
+        CODE_SIGNING_ALLOWED: "NO"
+        OTHER_LDFLAGS:
+          - "-lsqlite3"
+
 schemes:
-  HermesTouchBar:
+  HermesTouchBarTests:
     build:
       targets:
-        HermesTouchBar: all
-    run:
-      config: Release
+        HermesTouchBarTests: all
+    test:
+      targets:
+        - name: HermesTouchBarTests

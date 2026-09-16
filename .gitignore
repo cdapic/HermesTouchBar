@@ -4,6 +4,11 @@ build/
 *.o
 *.dSYM/
 
+# XcodeGen-generated project (regenerate via `xcodegen generate`)
+HermesTouchBar.xcodeproj/
+xcuserdata/
+DerivedData/
+
 # Local development notes & config (个人工作笔记，不进 git)
 memory-bank/
 .claude/

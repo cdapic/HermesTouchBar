@@ -56,3 +56,16 @@ if [ -n "$HERMES_PY" ] && [ -x "$HERMES_PY" ]; then
     "$HERMES_PY" tests/derive_state_smoke.py
     echo
 fi
+
+# Tier E — formal XCTest target via the XcodeGen-generated project.
+# Requires: brew install xcodegen && xcodegen generate (once, or after any
+# project.yml change). Keeps the swiftc smokes above as the fast loop; this
+# is the authoritative test run.
+echo "==> xcodebuild test (HermesTouchBarTests)"
+if [ -d HermesTouchBar.xcodeproj ]; then
+    xcodebuild test -project HermesTouchBar.xcodeproj -scheme HermesTouchBarTests \
+        -destination 'platform=macOS' -quiet 2>&1 | tail -6
+else
+    echo "    HermesTouchBar.xcodeproj missing — run: xcodegen generate"
+    exit 1
+fi
