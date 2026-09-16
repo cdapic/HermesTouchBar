@@ -156,12 +156,78 @@ def _read_cron_last_fired() -> tuple[float | None, str | None]:
 # error (mirrors _ERROR_FINISH_REASONS in hermes_state.py).
 _ERROR_FINISH_REASONS = frozenset({"error", "agent_error", "content_filter"})
 
+# ---------------------------------------------------------------------------
+# Mid-turn detection via agent.log (Tier A.3 hotfix #2)
+#
+# While Hermes streams a plain-text reply, state.db receives NO rows
+# (messages only land when the full assistant row is written at the end of
+# the turn), so the message tail alone cannot distinguish "idle, waiting for
+# input" from "actively generating". Hermes' conversation-loop lifecycle IS
+# visible in ~/.hermes/logs/agent.log:
+#
+#   turn start:  `agent.turn_context: conversation turn ...`        (with [sid])
+#                `tui_gateway.server: tui prompt accepted ...`      (with agent_session_id=)
+#   turn end:    `agent.conversation_loop: Turn ended: ...`
+#                `tui_gateway.server: tui turn finished: ...`
+#
+# A turn START without a matching END means Hermes is working right now —
+# the same interval during which the Touch Bar previously showed 准备中
+# (ready) because the last DB row was still the user message.
+# ---------------------------------------------------------------------------
+_AGENT_LOG_TAIL_BYTES = 64 * 1024
+_LOG_TS = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}),(\d{3})")
+_TURN_START = re.compile(
+    r"agent\.turn_context: conversation turn|tui_gateway\.server: tui prompt accepted"
+)
+_TURN_END = re.compile(
+    r"agent\.conversation_loop: Turn ended|tui_gateway\.server: tui turn finished"
+)
+
+
+def _read_agent_turn() -> tuple[float | None, float | None]:
+    """Scan the agent.log tail for the last turn START and END timestamps.
+
+    Returns (last_start_ts, last_end_ts) as epoch seconds, or (None, None)
+    when the log is missing/unreadable. Lines are time-ordered in the file,
+    so the last match of each kind is the most recent. A turn that started
+    but never ended (start > end, or end is None) means the agent is
+    mid-turn right now.
+    """
+    log = HERMES_HOME / "logs" / "agent.log"
+    if not log.exists():
+        return (None, None)
+    try:
+        size = log.stat().st_size
+        with open(log, "rb") as f:
+            f.seek(max(0, size - _AGENT_LOG_TAIL_BYTES))
+            raw = f.read().decode("utf-8", "replace")
+    except Exception:
+        return (None, None)
+    last_start: float | None = None
+    last_end: float | None = None
+    for line in raw.splitlines():
+        m = _LOG_TS.match(line)
+        if not m:
+            continue
+        try:
+            ts = time.mktime(
+                time.strptime(f"{m.group(1)} {m.group(2)}", "%Y-%m-%d %H:%M:%S")
+            ) + int(m.group(3)) / 1000.0
+        except (ValueError, OverflowError):
+            continue
+        if _TURN_START.search(line):
+            last_start = ts
+        elif _TURN_END.search(line):
+            last_end = ts
+    return (last_start, last_end)
+
 
 def _derive_state(
     messages: list[dict[str, Any]],
     last_activity_at: float | None,
     now: float,
     has_active_session: bool,
+    in_turn: bool = False,
 ) -> str | None:
     """Derive the authoritative Hermes state from the active session's tail
     (Tier A.3).
@@ -232,6 +298,12 @@ def _derive_state(
     if role == "tool":
         return decay(60.0, "working", sticky=True)
     if role == "user":
+        # Mid-turn (agent.log shows a turn start with no end yet): Hermes
+        # accepted the prompt and is generating/tooling, but the assistant
+        # row hasn't landed in state.db yet (plain-text replies only write
+        # at the end). Show working instead of "waiting for input".
+        if in_turn:
+            return decay(60.0, "working", sticky=True)
         return "ready"
     return "ready" if has_active_session else "idle"
 
@@ -335,6 +407,7 @@ def _collect() -> dict[str, Any]:
         context_tokens: int | None = None
         context_max: int | None = None
         derived_state: str | None = None
+        agent_turn: dict[str, Any] = {"in_turn": False, "started_at": None}
         try:
             db = SessionDB()
             try:
@@ -430,15 +503,35 @@ def _collect() -> dict[str, Any]:
                                 ),
                             })
                         # Tier A.3 — authoritative state derived from the
-                        # session tail + live heartbeat. `tail` holds the
-                        # FULL message rows (incl. tool_calls / reasoning),
-                        # so no extra query is needed.
+                        # session tail + live heartbeat + mid-turn marker.
+                        # `tail` holds the FULL message rows (incl.
+                        # tool_calls / reasoning), so no extra query is
+                        # needed.
+                        # Hotfix #2: plain-text replies write no DB rows
+                        # while streaming, so the tail alone reads "ready"
+                        # for the whole generation. agent.log's turn
+                        # START/END markers tell us Hermes is mid-turn.
+                        turn_start, turn_end = _read_agent_turn()
+                        in_turn = (
+                            turn_start is not None
+                            and (turn_end is None or turn_start > turn_end)
+                            # Stale guard: a start with no end is only
+                            # meaningful while recent; if the log rotated
+                            # or Hermes died mid-turn, fall back to the
+                            # message/heartbeat logic.
+                            and (time.time() - turn_start) < 3600.0
+                        )
                         derived_state = _derive_state(
                             tail,
                             top.get("last_activity_at"),
                             time.time(),
                             True,
+                            in_turn=in_turn,
                         )
+                        agent_turn = {
+                            "in_turn": in_turn,
+                            "started_at": turn_start,
+                        }
                         # Context usage — Hermes exposes no persisted "current
                         # window" counter (sessions.input_tokens is CUMULATIVE
                         # and was misused before → showed ~70% for a 2% real
@@ -477,7 +570,6 @@ def _collect() -> dict[str, Any]:
                 db.close()
         except Exception as e:
             error = (error + "; " if error else "") + f"session listing failed: {e}"
-
     cron_last, cron_id = _read_cron_last_fired()
 
     return {
@@ -489,6 +581,7 @@ def _collect() -> dict[str, Any]:
         "sessions": all_sessions,
         "session_count": len(all_sessions),
         "state": derived_state if _IMPORT_ERROR is None else None,  # Tier A.3
+        "agent": agent_turn,  # mid-turn marker (hotfix #2); Swift ignores it
         "approval": _read_pending_approval(),
         "cron": {
             "last_fired_at": cron_last,
@@ -515,6 +608,7 @@ def _synthetic(error: str) -> dict[str, Any]:
         "sessions": [],
         "session_count": 0,
         "state": None,
+        "agent": {"in_turn": False, "started_at": None},
         "approval": {"pending": False, "prompt": None, "tool": None},
         "cron": {"last_fired_at": None, "recent_job_id": None},
         "context_tokens": None,

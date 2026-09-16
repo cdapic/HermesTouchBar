@@ -487,9 +487,13 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             x: 0, y: 0, width: 80, height: Self.itemHeight
         ))
         container.wantsLayer = true
+        // Use the skin accent from creation — a systemBlue placeholder here
+        // rendered one frame of blue borders on every bar rebuild (visible
+        // when returning from the session picker) before update() retinted.
+        let accent = skinProvider.current.color("ui_accent")
         container.layer?.borderWidth = 1
         container.layer?.cornerRadius = 3
-        container.layer?.borderColor = NSColor.systemBlue.cgColor
+        container.layer?.borderColor = accent.cgColor
 
         // One centered field for "emoji + label". Keeps the pill visually
         // balanced with ctx/model/session, all of which center their text.
@@ -518,9 +522,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             x: 0, y: 0, width: 64, height: Self.itemHeight
         ))
         container.wantsLayer = true
+        let accent = skinProvider.current.color("ui_accent")
         container.layer?.borderWidth = 1
         container.layer?.cornerRadius = 3
-        container.layer?.borderColor = NSColor.systemBlue.cgColor
+        container.layer?.borderColor = accent.cgColor
 
         let field = CenteredTextView(frame: NSRect(
             x: 0, y: 0, width: 64, height: Self.itemHeight
@@ -544,9 +549,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             x: 0, y: 0, width: 115, height: Self.itemHeight
         ))
         container.wantsLayer = true
+        let accent = skinProvider.current.color("ui_accent")
         container.layer?.borderWidth = 1
         container.layer?.cornerRadius = 3
-        container.layer?.borderColor = NSColor.systemBlue.cgColor
+        container.layer?.borderColor = accent.cgColor
 
         let field = CenteredTextView(frame: NSRect(
             x: 0, y: 0, width: 115, height: Self.itemHeight

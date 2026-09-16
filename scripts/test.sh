@@ -43,3 +43,16 @@ for t in tests/*.swift; do
     echo
 done
 shopt -u nullglob
+
+# Python smoke: hermes_source state derivation + mid-turn detection.
+# _derive_state itself is stdlib-only (Hermes imports are best-effort), so
+# this runs with the Hermes venv python when available, else system python3.
+HERMES_PY="${HERMES_PYTHON:-$HOME/.hermes/hermes-agent/venv/bin/python3}"
+if [ ! -x "$HERMES_PY" ]; then
+    HERMES_PY="$(command -v python3 || true)"
+fi
+if [ -n "$HERMES_PY" ] && [ -x "$HERMES_PY" ]; then
+    echo "==> tests/derive_state_smoke.py"
+    "$HERMES_PY" tests/derive_state_smoke.py
+    echo
+fi
