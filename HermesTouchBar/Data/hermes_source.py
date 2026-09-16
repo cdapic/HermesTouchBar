@@ -167,39 +167,55 @@ def _derive_state(
     (Tier A.3).
 
     Mirrors Hermes' own classify_session_status semantics (hermes_state.py:
-    the LAST message's shape decides the lifecycle) plus DESIGN §2
-    thresholds:
+    the LAST message's shape decides the lifecycle) plus DESIGN §2 thresholds:
 
       assistant + error finish_reason  → error   (30s window)
-      assistant + tool_calls / finish  → working (5s)
+      assistant + tool_calls / finish  → working (sticky)
       assistant + finish=stop          → ok      (12s)
-      assistant + reasoning            → thinking(5s)
-      assistant + NULL finish_reason   → streaming (8s) — the model is still
-                                         emitting; Hermes writes assistant rows
-                                         in real time (69 NULL-finish rows in
-                                         state.db), so a NULL finish on the
-                                         last row means output is in flight.
-      tool as the last row             → working (5s) — result just landed,
-                                         agent is consuming it.
+      assistant + reasoning            → thinking(sticky)
+      assistant + NULL finish_reason   → streaming (sticky) — the model is
+                                         still emitting
+      tool as the last row             → working (sticky) — result just
+                                         landed, agent is consuming it.
       user as the last row             → ready — waiting for input.
 
-    The age used for window decay comes from the session's live
-    last_activity_at heartbeat (Hermes refreshes it while the agent is
-    active), NOT the last message's timestamp, so a long-running response
-    doesn't wrongly decay to ready. Returns None only when the caller has
-    no session-level evidence (empty list, no activity).
+    Age base is the LAST MESSAGE's timestamp, NOT the session's
+    last_activity_at. A state transition is only observable when Hermes
+    writes a row; last_activity_at is a ~60s-granular heartbeat
+    (SESSION_ACTIVITY_HEARTBEAT_MIN_INTERVAL_SECONDS in
+    agent/session_activity.py) and lags long-running tools — using it made
+    working/ok decay to ready mid-tool (the "状态 pill 恒准备中 / 完成无提示"
+    report after Tier A.3).
+
+    In-flight states (working/streaming/thinking) additionally STICK while
+    the session's activity heartbeat is fresh: the agent is demonstrably
+    still alive, so a long tool (browser_exec took 37s in one real session)
+    stays visible as working instead of flickering back to ready. Terminal
+    states (ok/error) never stick — they decay per DESIGN §2 so a finished
+    turn doesn't linger. Returns None only when the caller has no
+    session-level evidence.
     """
     if not messages:
         return "ready" if has_active_session else "idle"
     last = messages[-1]
+    ts = last.get("timestamp")
+    age = (now - float(ts)) if isinstance(ts, (int, float)) else None
     role = (last.get("role") or "").strip().lower()
     finish = ((last.get("finish_reason") or "").strip().lower() or None)
     has_tool = bool(last.get("tool_calls"))
     has_reasoning = bool(last.get("reasoning") or last.get("reasoning_content"))
-    age = (now - float(last_activity_at)) if isinstance(last_activity_at, (int, float)) else None
+    # Fresh heartbeat = the agent has stamped activity recently (60s cadence
+    # → 120s means at least one stamp). Used ONLY to stick in-flight states;
+    # a dead agent stops stamping and decays to ready.
+    heartbeat_fresh = (
+        isinstance(last_activity_at, (int, float))
+        and (now - float(last_activity_at)) < 120.0
+    )
 
-    def decay(window: float, state: str) -> str:
+    def decay(window: float, state: str, sticky: bool = False) -> str:
         if age is None or age < window:
+            return state
+        if sticky and heartbeat_fresh:
             return state
         return "ready" if has_active_session else "idle"
 
@@ -207,14 +223,14 @@ def _derive_state(
         if finish in _ERROR_FINISH_REASONS:
             return decay(30.0, "error")
         if finish == "tool_calls" or has_tool:
-            return decay(5.0, "working")
+            return decay(60.0, "working", sticky=True)
         if finish == "stop":
             return decay(12.0, "ok")
         if has_reasoning:
-            return decay(5.0, "thinking")
-        return decay(8.0, "streaming")
+            return decay(30.0, "thinking", sticky=True)
+        return decay(30.0, "streaming", sticky=True)
     if role == "tool":
-        return decay(5.0, "working")
+        return decay(60.0, "working", sticky=True)
     if role == "user":
         return "ready"
     return "ready" if has_active_session else "idle"
