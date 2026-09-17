@@ -1,4 +1,5 @@
-# XcodeGen project manifest — Tier E (test infrastructure).
+# XcodeGen project manifest — Tier E (test infrastructure) + Tier F (Domain
+# package).
 #
 # Generates HermesTouchBar.xcodeproj via:
 #   xcodegen generate
@@ -6,15 +7,14 @@
 #   xcodebuild test -project HermesTouchBar.xcodeproj -scheme HermesTouchBarTests \
 #     -destination 'platform=macOS'
 #
-# Scope note: this manifest covers the FORMAL TEST TARGET only — the pure-logic
-# sources (Skin/Status/Models/Data) + the XCTest ports in tests/unit. The app
-# itself still builds via scripts/build.sh (swiftc + the private-API ObjC
-# bridge), because the DFRFoundation/dlopen bridge doesn't fit an ordinary
-# Xcode app target yet. Keeping the test target free of AppDelegate /
-# TouchBarController means `xcodebuild test` never touches the private API.
-#
-# When the app target is eventually added to this manifest, the bridge should
-# move into a proper framework target first.
+# Scope note: this manifest covers the FORMAL TEST TARGET only. Since Tier F
+# the pure-logic layer lives in the local SwiftPM package `Domain/`
+# (HermesDomain), and the test target depends on it — it no longer compiles
+# production sources inline. The app itself still builds via scripts/build.sh
+# (swiftc + the private-API ObjC bridge), because the DFRFoundation/dlopen
+# bridge doesn't fit an ordinary Xcode app target yet. Keeping the test target
+# free of AppDelegate / TouchBarController means `xcodebuild test` never
+# touches the private API.
 
 name: HermesTouchBar
 
@@ -24,19 +24,18 @@ options:
     macOS: "13.0"
   createIntermediateGroups: true
 
+packages:
+  HermesDomain:
+    path: Domain
+
 targets:
   HermesTouchBarTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - tests/unit
-      - HermesTouchBar/Skin/SkinProvider.swift
-      - HermesTouchBar/Status/StatusReader.swift
-      - HermesTouchBar/Status/StateMachine.swift
-      - HermesTouchBar/Models/State.swift
-      - HermesTouchBar/Models/HermesWireStatus.swift
-      - HermesTouchBar/Models/HermesWireActivity.swift
-      - HermesTouchBar/Data/HermesPythonSource.swift
+    dependencies:
+      - package: HermesDomain
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hermestouchbar.tests

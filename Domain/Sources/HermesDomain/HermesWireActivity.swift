@@ -10,15 +10,15 @@
 
 import Foundation
 
-struct HermesWireActivityTimestamps {
-    let lastAssistantAt: Date?
-    let lastUserAt: Date?
-    let lastToolAt: Date?
-    let lastReasoningAt: Date?
-    let lastFinishReason: String?
-    let lastErrorAt: Date?
+public struct HermesWireActivityTimestamps {
+    public let lastAssistantAt: Date?
+    public let lastUserAt: Date?
+    public let lastToolAt: Date?
+    public let lastReasoningAt: Date?
+    public let lastFinishReason: String?
+    public let lastErrorAt: Date?
 
-    init(from messages: [HermesWireMessage]) {
+    public init(from messages: [HermesWireMessage]) {
         var assistant: Date?
         var user: Date?
         var tool: Date?

@@ -3,6 +3,7 @@
 // The original smoke file stays for scripts/test.sh quick regression.
 
 import XCTest
+import HermesDomain
 import AppKit
 
 final class SkinProviderTests: XCTestCase {

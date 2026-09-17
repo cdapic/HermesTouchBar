@@ -2,6 +2,7 @@
 // runs under `xcodebuild test` via the XcodeGen-generated xcodeproj.
 
 import XCTest
+import HermesDomain
 import Foundation
 
 final class HermesWireStatusTests: XCTestCase {
@@ -13,7 +14,7 @@ final class HermesWireStatusTests: XCTestCase {
         {"v":1,"ts":1789440714.987,"gateway":{"running":false,"manager":"launchd","pids":[]},"session":null,"sessions":[],"session_count":0,"state":null,"approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[]}
         """
         do {
-            let wire = try HermesPythonSource.decoder.decode(
+            let wire = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: minimal.data(using: .utf8)!
             )
@@ -34,7 +35,7 @@ final class HermesWireStatusTests: XCTestCase {
         {"v":1,"ts":1789440715.535,"gateway":{"running":true,"manager":"launchd","pids":[5965,5730]},"session":{"id":"20260710_093922_c6096a66","source":"feishu","model":"MiniMax-M3","started_at":1783647562.260,"last_active":1783647582.874},"sessions":[{"id":"20260710_093922_c6096a66","source":"feishu","model":"MiniMax-M3","started_at":1783647562.260,"last_active":1783647582.874,"state":"working"},{"id":"20260710_093922_deadbeef","source":"tui","model":"MiniMax-M3","started_at":1783647000.0,"last_active":1783647500.0,"state":"ready"}],"session_count":2,"state":null,"approval":{"pending":true,"prompt":"(Y/n)","tool":"shell_exec"},"cron":{"last_fired_at":1789440700.0,"recent_job_id":"morning"},"skin":"slate","recent_messages":[{"role":"assistant","timestamp":1783647576.45,"tool_name":null,"finish_reason":"tool_calls","is_reasoning":true},{"role":"tool","timestamp":1783647580.08,"tool_name":"terminal","finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":1783647582.81,"tool_name":null,"finish_reason":"stop","is_reasoning":false}]}
         """
         do {
-            let wire = try HermesPythonSource.decoder.decode(
+            let wire = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: full.data(using: .utf8)!
             )
@@ -75,7 +76,7 @@ final class HermesWireStatusTests: XCTestCase {
         {"v":1,"ts":1.0,"gateway":{"running":true,"manager":"x","pids":[]},"session":{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0},"sessions":[{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0}],"session_count":1,"state":"working","approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[]}
         """
         do {
-            let wire = try HermesPythonSource.decoder.decode(
+            let wire = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: stateFrame.data(using: .utf8)!
             )
@@ -94,7 +95,7 @@ final class HermesWireStatusTests: XCTestCase {
         {"v":1,"ts":1.0,"gateway":{"running":true,"manager":"x","pids":[]},"session":{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0},"sessions":[{"id":"s1","source":"tui","model":"m","started_at":1.0,"last_active":1.0}],"session_count":1,"state":null,"approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[{"role":"user","timestamp":100.0,"tool_name":null,"finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":110.0,"tool_name":null,"finish_reason":"tool_calls","is_reasoning":true},{"role":"tool","timestamp":115.0,"tool_name":"shell","finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":120.0,"tool_name":null,"finish_reason":"error","is_reasoning":false}]}
         """
         do {
-            let wire = try HermesPythonSource.decoder.decode(
+            let wire = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: tsFrame.data(using: .utf8)!
             )
@@ -119,7 +120,7 @@ final class HermesWireStatusTests: XCTestCase {
         {"v":2,"ts":1.0,"gateway":{"running":false,"manager":"x","pids":[]},"session":null,"sessions":[],"session_count":0,"state":null,"approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[],"new_field":"unknown"}
         """
         do {
-            let wire = try HermesPythonSource.decoder.decode(
+            let wire = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: v2.data(using: .utf8)!
             )
@@ -132,7 +133,7 @@ final class HermesWireStatusTests: XCTestCase {
         // 4) Malformed JSON: decoder throws (HermesPythonSource catches).
         let bad = "not json"
         do {
-            _ = try HermesPythonSource.decoder.decode(
+            _ = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: bad.data(using: .utf8)!
             )
@@ -145,7 +146,7 @@ final class HermesWireStatusTests: XCTestCase {
         for raw in ["idle","ready","thinking","working","streaming",
                     "waiting_approval","ok","error"] {
             do {
-                let s = try HermesPythonSource.decoder.decode(
+                let s = try JSONDecoder().decode(
                     HermesWireState.self,
                     from: "\"\(raw)\"".data(using: .utf8)!
                 )
@@ -161,7 +162,7 @@ final class HermesWireStatusTests: XCTestCase {
         {"ts":1.0,"gateway":{"running":false,"manager":"x","pids":[]},"session":null,"sessions":[],"session_count":0,"state":null,"approval":{"pending":false,"prompt":null,"tool":null},"cron":{"last_fired_at":null,"recent_job_id":null},"skin":null,"recent_messages":[]}
         """
         do {
-            _ = try HermesPythonSource.decoder.decode(
+            _ = try JSONDecoder().decode(
                 HermesWireStatus.self,
                 from: missingV.data(using: .utf8)!
             )

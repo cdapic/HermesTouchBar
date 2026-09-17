@@ -13,27 +13,27 @@
 
 import Foundation
 
-struct HermesWireStatus: Codable {
-    let v: Int
-    let ts: TimeInterval
-    let gateway: HermesWireGateway
-    let session: HermesWireSession?
-    let sessions: [HermesWireSession]
-    let sessionCount: Int
-    let state: HermesWireState?
-    let approval: HermesWireApproval
-    let cron: HermesWireCron
+public struct HermesWireStatus: Codable {
+    public let v: Int
+    public let ts: TimeInterval
+    public let gateway: HermesWireGateway
+    public let session: HermesWireSession?
+    public let sessions: [HermesWireSession]
+    public let sessionCount: Int
+    public let state: HermesWireState?
+    public let approval: HermesWireApproval
+    public let cron: HermesWireCron
     /// Current-context usage as computed by Hermes' own estimator on the
     /// active session's live messages (NOT the cumulative sessions tokens —
     /// that misreported ~70% for a real 2% window). Nil when the Python side
     /// could not estimate; merge falls back to the sqlite-derived value.
-    let contextTokens: Int?
-    let contextMax: Int?
-    let skin: String?
-    let recentMessages: [HermesWireMessage]
-    let error: String?
+    public let contextTokens: Int?
+    public let contextMax: Int?
+    public let skin: String?
+    public let recentMessages: [HermesWireMessage]
+    public let error: String?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case v, ts, gateway, session, state, approval, cron, skin
         case sessions
         case sessionCount = "session_count"
@@ -45,33 +45,33 @@ struct HermesWireStatus: Codable {
 
     /// Schema version this build knows how to decode. Anything else is
     /// logged and dropped (see `HermesPythonSource.decodeAndYield`).
-    static let supportedVersion = 1
+    public static let supportedVersion = 1
 }
 
-struct HermesWireGateway: Codable {
-    let running: Bool
-    let manager: String
-    let pids: [Int]
+public struct HermesWireGateway: Codable {
+    public let running: Bool
+    public let manager: String
+    public let pids: [Int]
 }
 
-struct HermesWireSession: Codable {
-    let id: String?
-    let source: String?
-    let model: String?
-    let startedAt: TimeInterval?
-    let lastActive: TimeInterval?
+public struct HermesWireSession: Codable {
+    public let id: String?
+    public let source: String?
+    public let model: String?
+    public let startedAt: TimeInterval?
+    public let lastActive: TimeInterval?
     /// Human-readable session title (TUI/CLI sessions carry one, e.g.
     /// "评审Matrix看板widget方案"; gateway sessions may be empty). The picker
     /// falls back to `source (id)` when nil/empty.
-    let title: String?
+    public let title: String?
     /// Per-session authoritative state (session linkage). Python derives a
     /// state for EVERY active session; when the user pins one, Swift uses
     /// THIS session's state so the state pill follows what the user is
     /// looking at. Nil when the frame predates the field or the session has
     /// no derivable state.
-    let state: HermesWireState?
+    public let state: HermesWireState?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, source, model, title, state
         case startedAt = "started_at"
         case lastActive = "last_active"
@@ -80,7 +80,7 @@ struct HermesWireSession: Codable {
 
 /// Hermes-supplied state. `nil` means "I don't know" — fall back to local
 /// time-window heuristics in `StateMachine`.
-enum HermesWireState: String, Codable {
+public enum HermesWireState: String, Codable {
     case idle, ready, thinking, working, streaming
     case waitingApproval = "waiting_approval"
     case ok, error
@@ -88,7 +88,7 @@ enum HermesWireState: String, Codable {
     /// Wire state → the UI's HermesState. The wire has no `gatewayDown`
     /// (that's a local inference from `gateway.running`), so the mapping is
     /// total — every wire value has a UI counterpart.
-    func toHermesState() -> HermesState {
+    public func toHermesState() -> HermesState {
         switch self {
         case .idle:            return .idle
         case .ready:           return .ready
@@ -102,17 +102,17 @@ enum HermesWireState: String, Codable {
     }
 }
 
-struct HermesWireApproval: Codable {
-    let pending: Bool
-    let prompt: String?
-    let tool: String?
+public struct HermesWireApproval: Codable {
+    public let pending: Bool
+    public let prompt: String?
+    public let tool: String?
 }
 
-struct HermesWireCron: Codable {
-    let lastFiredAt: TimeInterval?
-    let recentJobId: String?
+public struct HermesWireCron: Codable {
+    public let lastFiredAt: TimeInterval?
+    public let recentJobId: String?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case lastFiredAt = "last_fired_at"
         case recentJobId = "recent_job_id"
     }
@@ -122,14 +122,14 @@ struct HermesWireCron: Codable {
 /// `SessionDB.get_messages(session_id, limit=5)`. Only the fields the
 /// StateMachine needs are kept; full transcripts are unnecessary for a
 /// glanceable Touch Bar.
-struct HermesWireMessage: Codable {
-    let role: String?
-    let timestamp: TimeInterval?
-    let toolName: String?
-    let finishReason: String?
-    let isReasoning: Bool
+public struct HermesWireMessage: Codable {
+    public let role: String?
+    public let timestamp: TimeInterval?
+    public let toolName: String?
+    public let finishReason: String?
+    public let isReasoning: Bool
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case role, timestamp
         case toolName = "tool_name"
         case finishReason = "finish_reason"

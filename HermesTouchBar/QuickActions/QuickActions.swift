@@ -6,6 +6,7 @@
 
 import AppKit
 import Carbon.HIToolbox.Events
+import HermesDomain
 
 final class QuickActions {
 

@@ -3,6 +3,7 @@
 // app lives in the menu bar without a Dock icon.
 
 import AppKit
+import HermesDomain
 
 @main
 enum HermesTouchBarApp {

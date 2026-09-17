@@ -2,6 +2,7 @@
 // runs under `xcodebuild test` via the XcodeGen-generated xcodeproj.
 
 import XCTest
+import HermesDomain
 import Foundation
 
 final class StateMachineTests: XCTestCase {

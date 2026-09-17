@@ -19,12 +19,12 @@
 import Foundation
 import AppKit
 
-struct HermesSkin {
-    let name: String
-    let description: String
-    let colors: [String: String]   // key -> "#RRGGBB"
-    let toolPrefix: String
-    let promptSymbol: String
+public struct HermesSkin {
+    public let name: String
+    public let description: String
+    public let colors: [String: String]   // key -> "#RRGGBB"
+    public let toolPrefix: String
+    public let promptSymbol: String
 
     /// Resolve a token. Lookup order:
     ///   1. this skin's `colors`
@@ -33,7 +33,7 @@ struct HermesSkin {
     ///      skins that lean on the upstream "fall back to banner_dim" rule)
     ///   3. literal "#888888" (so we never return transparent/black on a
     ///      missing key in a way that hides UI state)
-    func color(_ key: String) -> NSColor {
+    public func color(_ key: String) -> NSColor {
         let hex = colors[key]
             ?? HermesSkin.default.colors[key]
             ?? "#888888"
@@ -44,7 +44,7 @@ struct HermesSkin {
     //
     // Order matters — `cycleNext()` walks this list verbatim and `available`
     // is built by prepending it to the user-YAML list.
-    static let builtinOrder: [String] = [
+    public static let builtinOrder: [String] = [
         "default", "ares", "mono", "slate", "daylight",
         "warm-lightmode", "poseidon", "sisyphus", "charizard"
     ]
@@ -53,7 +53,7 @@ struct HermesSkin {
     /// the other eight mirror upstream `skin_engine.py` `_BUILTIN_SKINS`.
     /// Touch Bar consumes only ~10 of these keys (see DESIGN.md §5.4); the
     /// extras are kept so TUI/desktop consumers can share this dict later.
-    static let builtinTable: [String: HermesSkin] = [
+    public static let builtinTable: [String: HermesSkin] = [
         "default":         .default,
         "ares":            .ares,
         "mono":            .mono,
@@ -68,7 +68,7 @@ struct HermesSkin {
     /// Fallback palette. Mirrors upstream `default` in `skin_engine.py`.
     /// Used both as a real builtin AND as the cross-skin fallback inside
     /// `color(_:)`.
-    static let `default` = HermesSkin(
+    public static let `default` = HermesSkin(
         name: "default",
         description: "Classic Hermes — gold and kawaii",
         colors: [
@@ -94,7 +94,7 @@ struct HermesSkin {
     )
 
     /// War-god theme — crimson and bronze.
-    static let ares = HermesSkin(
+    public static let ares = HermesSkin(
         name: "ares",
         description: "War-god theme — crimson and bronze",
         colors: [
@@ -120,7 +120,7 @@ struct HermesSkin {
     )
 
     /// Monochrome — clean grayscale.
-    static let mono = HermesSkin(
+    public static let mono = HermesSkin(
         name: "mono",
         description: "Monochrome — clean grayscale",
         colors: [
@@ -146,7 +146,7 @@ struct HermesSkin {
     )
 
     /// Cool blue — developer-focused.
-    static let slate = HermesSkin(
+    public static let slate = HermesSkin(
         name: "slate",
         description: "Cool blue — developer-focused",
         colors: [
@@ -172,7 +172,7 @@ struct HermesSkin {
     )
 
     /// Light theme for bright terminals with dark text and cool blue accents.
-    static let daylight = HermesSkin(
+    public static let daylight = HermesSkin(
         name: "daylight",
         description: "Light theme for bright terminals with dark text and cool blue accents",
         colors: [
@@ -200,7 +200,7 @@ struct HermesSkin {
     )
 
     /// Warm light mode — dark brown/gold text for light terminal backgrounds.
-    static let warmLightmode = HermesSkin(
+    public static let warmLightmode = HermesSkin(
         name: "warm-lightmode",
         description: "Warm light mode — dark brown/gold text for light terminal backgrounds",
         colors: [
@@ -228,7 +228,7 @@ struct HermesSkin {
     )
 
     /// Ocean-god theme — deep blue and seafoam.
-    static let poseidon = HermesSkin(
+    public static let poseidon = HermesSkin(
         name: "poseidon",
         description: "Ocean-god theme — deep blue and seafoam",
         colors: [
@@ -254,7 +254,7 @@ struct HermesSkin {
     )
 
     /// Sisyphean theme — austere grayscale with persistence.
-    static let sisyphus = HermesSkin(
+    public static let sisyphus = HermesSkin(
         name: "sisyphus",
         description: "Sisyphean theme — austere grayscale with persistence",
         colors: [
@@ -280,7 +280,7 @@ struct HermesSkin {
     )
 
     /// Volcanic theme — burnt orange and ember.
-    static let charizard = HermesSkin(
+    public static let charizard = HermesSkin(
         name: "charizard",
         description: "Volcanic theme — burnt orange and ember",
         colors: [
@@ -308,32 +308,34 @@ struct HermesSkin {
     )
 
     /// Legacy alias preserved for callers that referenced the old static list.
-    static let builtinNames: [String] = builtinOrder
+    public static let builtinNames: [String] = builtinOrder
 }
 
-final class SkinProvider {
+public final class SkinProvider {
 
-    private(set) var current: HermesSkin = .default
-    private(set) var available: [String] = HermesSkin.builtinOrder
+    public private(set) var current: HermesSkin = .default
+    public private(set) var available: [String] = HermesSkin.builtinOrder
     private var dirWatcher: DispatchSourceFileSystemObject?
     private var fd: Int32 = -1
     private let queue = DispatchQueue(label: "HermesTouchBar.skin")
     private var onChange: (() -> Void)?
 
-    func startWatching(onChange: @escaping () -> Void) {
+    public init() {}
+
+    public func startWatching(onChange: @escaping () -> Void) {
         self.onChange = onChange
         refresh()
         watch()
     }
 
-    func stopWatching() {
+    public func stopWatching() {
         dirWatcher?.cancel(); dirWatcher = nil
         if fd >= 0 { close(fd); fd = -1 }
     }
 
     /// Advance to the next skin in `available` order. Wraps; never returns the
     /// same skin twice in a row.
-    func cycleNext() {
+    public func cycleNext() {
         guard !available.isEmpty else { return }
         let idx = available.firstIndex(of: current.name) ?? -1
         let next = available[(idx + 1) % available.count]
@@ -351,7 +353,7 @@ final class SkinProvider {
     /// builtin names, which then color-fell-through to `default` — so
     /// `cycleNext` produced no visible change. Now builtins resolve to their
     /// real palette.
-    func setActive(_ name: String) {
+    public func setActive(_ name: String) {
         if let builtin = HermesSkin.builtinTable[name] {
             current = builtin
             onChange?()
@@ -407,15 +409,24 @@ final class SkinProvider {
     }
 
     // MARK: - IO helpers
+    /// Hermes home directory — mirrors StatusReader.defaultHome() (which
+    /// lives in the app shell). Inlined here so the Domain package has no
+    /// dependency on the DataSource layer.
+    private static func hermesHome() -> URL {
+        let env = ProcessInfo.processInfo.environment["HERMES_HOME"]
+        if let env, !env.isEmpty { return URL(fileURLWithPath: env) }
+        return URL(fileURLWithPath: NSString("~/.hermes").expandingTildeInPath)
+    }
+
     private func skinsDir() -> URL {
-        let home = StatusReader.defaultHome()
+        let home = Self.hermesHome()
         return home.appendingPathComponent("skins")
     }
     private func skinFile(_ name: String) -> URL {
         skinsDir().appendingPathComponent("\(name).yaml")
     }
     private func readActiveSkinFromConfig() -> String? {
-        let path = StatusReader.defaultHome().appendingPathComponent("config.yaml").path
+        let path = Self.hermesHome().appendingPathComponent("config.yaml").path
         guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         for line in raw.split(separator: "\n") {
             // Explicit CharacterSet so the file also compiles standalone
@@ -436,7 +447,7 @@ final class SkinProvider {
     // MARK: - Tiny YAML loader
     /// Loads only the `name:`, `description:`, `tool_prefix:`, and `colors:`
     /// blocks we care about. Sufficient for all 9 builtin + 99% of user skins.
-    func loadYAML(at url: URL) throws -> HermesSkin {
+    public func loadYAML(at url: URL) throws -> HermesSkin {
         let raw = try String(contentsOf: url, encoding: .utf8)
         var name = url.deletingPathExtension().lastPathComponent
         var desc = ""
@@ -481,8 +492,8 @@ final class SkinProvider {
 }
 
 // MARK: - NSColor hex extension
-extension NSColor {
-    convenience init?(hex: String) {
+public extension NSColor {
+    public convenience init?(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }

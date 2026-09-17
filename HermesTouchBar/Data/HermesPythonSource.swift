@@ -27,6 +27,7 @@
 //     actor's continuation or downstream `@MainActor` consumer.
 
 import Foundation
+import HermesDomain
 
 actor HermesPythonSource {
 

@@ -16,6 +16,12 @@ cd "$PROJECT_DIR"
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
+# Tier F — the smoke checks now exercise the HermesDomain package (built via
+# SwiftPM) instead of compiling production sources inline. This proves the
+# public API of the package, not a copy of it.
+(cd "$PROJECT_DIR/Domain" && swift build --configuration release >/dev/null)
+DOMAIN_BIN="$(cd "$PROJECT_DIR/Domain" && swift build --configuration release --show-bin-path)"
+
 run_smoke() {
     local smoke_file="$1"
     local out_bin="/tmp/$(basename "$smoke_file" .swift)"
@@ -24,13 +30,8 @@ run_smoke() {
         -sdk "$SDK" \
         -target x86_64-apple-macos13.0 \
         -framework AppKit -lsqlite3 \
-        HermesTouchBar/Skin/SkinProvider.swift \
-        HermesTouchBar/Status/StatusReader.swift \
-        HermesTouchBar/Status/StateMachine.swift \
-        HermesTouchBar/Models/State.swift \
-        HermesTouchBar/Models/HermesWireStatus.swift \
-        HermesTouchBar/Models/HermesWireActivity.swift \
-        HermesTouchBar/Data/HermesPythonSource.swift \
+        -I "$DOMAIN_BIN/Modules" \
+        "$DOMAIN_BIN"/HermesDomain.build/*.o \
         "$smoke_file" \
         -o "$out_bin"
     "$out_bin"

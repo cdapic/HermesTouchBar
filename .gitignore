@@ -23,3 +23,6 @@ docs/
 # Editors
 .idea/
 .vscode/
+
+# SwiftPM build artifacts (Tier F Domain package)
+Domain/.build/

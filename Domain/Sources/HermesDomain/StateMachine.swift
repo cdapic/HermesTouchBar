@@ -3,9 +3,9 @@
 
 import Foundation
 
-final class StateMachine {
+public final class StateMachine {
 
-    private(set) var current: HermesState = .idle
+    public private(set) var current: HermesState = .idle
 
     /// Thresholds tuned for 1.5s polling cadence.
     private let workingWindow: TimeInterval = 5
@@ -14,8 +14,10 @@ final class StateMachine {
     private let errorWindow: TimeInterval = 30
     private let cronWindow: TimeInterval = 10
 
+    public init() {}
+
     @discardableResult
-    func evaluate(snapshot: HermesStatus) -> HermesState {
+    public func evaluate(snapshot: HermesStatus) -> HermesState {
         // 1. Gateway down always wins
         guard snapshot.gatewayUp else {
             current = .gatewayDown

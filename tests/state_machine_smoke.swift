@@ -5,6 +5,7 @@
 // Args in `snapshot(...)` must match the helper's declared order.
 
 import Foundation
+import HermesDomain
 import AppKit
 
 @main

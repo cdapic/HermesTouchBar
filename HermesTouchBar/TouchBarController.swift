@@ -19,6 +19,7 @@
 // not exposed in Swift).
 
 import AppKit
+import HermesDomain
 
 @MainActor
 final class TouchBarController: NSObject, NSTouchBarDelegate {

@@ -7,6 +7,7 @@
 //          -o /tmp/skin_smoke && /tmp/skin_smoke
 
 import Foundation
+import HermesDomain
 import AppKit
 
 @main

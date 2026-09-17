@@ -4,6 +4,7 @@
 // repaints the system-modal Touch Bar via PersistentTouchBarAPI.
 
 import AppKit
+import HermesDomain
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
