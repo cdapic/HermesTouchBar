@@ -238,9 +238,13 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             let max = max(snapshot.contextMax, 1)
             let pct = Int((Double(min(snapshot.contextTokens, max)) / Double(max)) * 100)
             field.text = "\(pct)% ctx"
+            // 0.3.0 UI: context usage is a status the user cares about —
+            // render it in the primary text color (was status_bar_dim, the
+            // "weak/secondary" token, which read too dark on every theme).
+            // Only >85% flips to the warn color.
             field.textColor = (pct > 85)
                 ? skin.color("ui_warn")
-                : skin.color("status_bar_dim")
+                : skin.color("status_bar_text")
         }
         // Session button shows the active session — prefer its title
         // (TUI/CLI sessions carry one, e.g. "S: 介绍自己"); fall back to
@@ -248,13 +252,15 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         if let item = sessionButtonItem {
             let surface: String
             if let title = snapshot.activeSessionTitle, !title.isEmpty {
-                surface = title.count > 16 ? String(title.prefix(16)) + "…" : title
+                // 0.3.0 UI: session pill grew from 149pt to ~205pt, so the
+                // title can show more (16 → 22 chars).
+                surface = title.count > 22 ? String(title.prefix(22)) + "…" : title
             } else if snapshot.activeSessionSource?.isEmpty == false {
                 surface = snapshot.activeSessionSource!
             } else {
                 surface = shortSessionId(snapshot.activeSessionId)
             }
-            item.title = "S: \(surface)"
+            applyButtonTitle(item, "S: \(surface)")
             // Debug: 4-pill width audit — the 3 custom containers vs the
             // session button, post-layout, so "widths differ" can be checked
             // against real numbers (see memory/pending-bugs.md 新问题 1).
@@ -438,6 +444,24 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             button.layer?.cornerRadius = 3
             button.layer?.borderColor = accent.cgColor
         }
+        // 0.3.0 UI: render every touch-bar button at the same 13pt medium as
+        // the read-only pills (system default was ~15pt — pill 4 visibly
+        // larger than the rest, including in the picker drilldown).
+        applyButtonTitle(item, item.title)
+    }
+
+    /// Set a touch-bar button's title at the unified 13pt medium size. The
+    /// session pill retitles itself on every update() via this, so the font
+    /// stays consistent across the live retitle too.
+    private func applyButtonTitle(_ item: NSButtonTouchBarItem, _ title: String) {
+        if let button = item.view as? NSButton {
+            button.attributedTitle = NSAttributedString(
+                string: title,
+                attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium)]
+            )
+        } else {
+            item.title = title
+        }
     }
 
     // MARK: - Button actions (NSButtonTouchBarItem targets)
@@ -498,15 +522,34 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     /// 测得系统把 3 个自定义 item 拉伸到 175pt、session 按标题自适应 ≈70pt，
     /// 则 bar 有效宽 W ≈ 3×175+70 = 595，session 固定 W/4 ≈ 149 即可 4 个等宽。
     /// 首次构建后用日志反推精确值（见 memory/pending-bugs.md 新问题 1）。
-    private static let sessionPillWidth: CGFloat = 149
+    // 0.3.0 UI — content-priority widths: state/ctx are content-sized (95/85
+    // keeps "⏸ 待审批" and "100% ctx" breathing comfortably), model/session
+    // share the rest (~205 each). Was: uniform 149pt across all four, which
+    // left long session titles cramped while state/ctx had dead space.
+    private static let statePillWidth: CGFloat = 95
+    private static let ctxPillWidth: CGFloat = 85
+    private static let sessionPillWidth: CGFloat = 205
 
     /// Combined `[icon state-text]` item. Replaces the old separate
     /// `idStateIcon` + `idStateText` pair so the visual reads as a single
     /// pill (and we don't get a redundant double border between them).
+    /// Pin a container to a fixed width so the system-modal layout cannot
+    /// stretch it (the layout evenly stretches unconstrained NSCustomTouchBarItem
+    /// containers; the old uniform-149 layout relied on that). Model keeps no
+    /// pin and absorbs the remaining width. Same trick as the session button's
+    /// widthAnchor clamp — .defaultHigh beats the system's stretch.
+    private func pinWidth(_ view: NSView, _ width: CGFloat) {
+        view.autoresizingMask = [.width, .height]
+        let c = view.widthAnchor.constraint(equalToConstant: width)
+        c.priority = .defaultHigh
+        c.isActive = true
+        view.frame.size.width = width
+    }
+
     private func makeState() -> NSTouchBarItem {
         let item = NSCustomTouchBarItem(identifier: idState)
         let container = NSView(frame: NSRect(
-            x: 0, y: 0, width: 80, height: Self.itemHeight
+            x: 0, y: 0, width: Self.statePillWidth, height: Self.itemHeight
         ))
         container.wantsLayer = true
         // Use the skin accent from creation — a systemBlue placeholder here
@@ -516,13 +559,16 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         container.layer?.borderWidth = 1
         container.layer?.cornerRadius = 3
         container.layer?.borderColor = accent.cgColor
+        // Content-priority width: state text ("⏸ 待审批" at 13pt medium ≈ 60pt)
+        // fits in 95pt; don't let the system stretch this pill.
+        pinWidth(container, Self.statePillWidth)
 
         // One centered field for "emoji + label". Keeps the pill visually
         // balanced with ctx/model/session, all of which center their text.
         // Loses the old separate-icon-at-15pt-semibold look — the emoji
         // is still distinct at 13pt medium because it's an emoji glyph.
         let field = CenteredTextView(frame: NSRect(
-            x: 0, y: 0, width: 80, height: Self.itemHeight
+            x: 0, y: 0, width: Self.statePillWidth, height: Self.itemHeight
         ))
         field.autoresizingMask = [.width, .height]
         field.text = "\(lastState.emoji) \(lastState.label)"
@@ -538,23 +584,27 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
 
     private func makeContext() -> NSTouchBarItem {
         let item = NSCustomTouchBarItem(identifier: idContext)
-        // 64pt fills "100% ctx" comfortably; center the text to match
-        // state/model/session.
+        // Content-priority width: "100% ctx" at 13pt monospaced ≈ 70pt; 85pt
+        // gives it comfortable padding without stealing space from model/session.
         let container = NSView(frame: NSRect(
-            x: 0, y: 0, width: 64, height: Self.itemHeight
+            x: 0, y: 0, width: Self.ctxPillWidth, height: Self.itemHeight
         ))
         container.wantsLayer = true
         let accent = skinProvider.current.color("ui_accent")
         container.layer?.borderWidth = 1
         container.layer?.cornerRadius = 3
         container.layer?.borderColor = accent.cgColor
+        pinWidth(container, Self.ctxPillWidth)
 
         let field = CenteredTextView(frame: NSRect(
-            x: 0, y: 0, width: 64, height: Self.itemHeight
+            x: 0, y: 0, width: Self.ctxPillWidth, height: Self.itemHeight
         ))
         field.autoresizingMask = [.width, .height]
         field.text = "—"
-        field.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        // 13pt matches the state pill's size (was 11pt — one notch smaller,
+        // which read as "inconsistent" next to pill 1). Monospaced keeps the
+        // % digits stable as the number changes.
+        field.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         field.alignment = .center
         container.addSubview(field)
 
@@ -566,7 +616,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
 
     private func makeModel() -> NSTouchBarItem {
         let item = NSCustomTouchBarItem(identifier: idModel)
-        // 115pt fits "M: MiniMax-M3" (~98pt); center the text.
+        // 115pt initial; the layout stretches this pill to absorb the width
+        // freed by state/ctx (content-priority), so model names have room.
         let container = NSView(frame: NSRect(
             x: 0, y: 0, width: 115, height: Self.itemHeight
         ))
@@ -581,7 +632,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         ))
         field.autoresizingMask = [.width, .height]
         field.text = "M: —"
-        field.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        // 13pt to match pill 1/2 (was 11pt).
+        field.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         field.alignment = .center
         container.addSubview(field)
 
@@ -605,10 +657,11 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             action: #selector(sessionTapped)
         )
         styleButtonItem(item)
-        // Pill 等宽：系统模态布局把 3 个自定义 item（state/ctx/model）拉伸到
-        // ~175pt（均分剩余宽度），而 NSButtonTouchBarItem 按标题自适应
-        // （"S: feishu" ≈ 70pt）→ session pill 明显窄。这里把按钮宽度钳到
-        // 目标值：widthAnchor(>=) + frame 双保险，让 4 个 pill 视觉等宽。
+        // 0.3.0 UI (content-priority): state/ctx are pinned narrow, model
+        // absorbs the stretch, and this button is clamped to the ~205pt share
+        // so long session titles have room. widthAnchor(>=) + frame double
+        // insurance (the old uniform-149 comment is superseded — see
+        // statePillWidth/ctxPillWidth).
         // 注：不能放进共享的 styleButtonItem——picker 的返回/会话按钮
         // 标题长短不一，固定宽度会破坏 picker 布局。
         if let button = item.view as? NSButton {

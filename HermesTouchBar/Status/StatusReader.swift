@@ -14,7 +14,7 @@ import Foundation
 import SQLite3
 import HermesDomain
 
-final class StatusReader {
+final class StatusReader: HermesStatusSource {
 
     private let hermesHome: URL
 

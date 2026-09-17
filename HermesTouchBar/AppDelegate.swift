@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Owned subsystems
     private let skinProvider = SkinProvider()
-    private let statusReader = StatusReader()
+    private let statusReader: any HermesStatusSource = StatusReader()
     private let stateMachine = StateMachine()
     private let wireSource = HermesPythonSource()
     private let touchBarController: TouchBarController
@@ -257,9 +257,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastWire = wire
         // Tier B: pick which session to display (pinned wins; else most
         // recent). Shared with the timer path so both always agree.
-        let displaySession = resolveDisplaySession(wire)
-        let merged = merge(wire: wire, sqlite: lastSqliteSnapshot ?? .empty,
-                           displaySession: displaySession)
+        let displaySession = HermesStatusMerger.resolveDisplaySession(
+            wire, pinnedSessionId: pinnedSessionId)
+        let merged = HermesStatusMerger.merge(
+            wire: wire, sqlite: lastSqliteSnapshot ?? .empty,
+            displaySession: displaySession)
         let state = stateMachine.evaluate(snapshot: merged)
         touchBarController.update(state: state, snapshot: merged)
         // Refresh the session popover's item list (sessions can come and go).
@@ -274,21 +276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             skinProvider.setActive(remoteSkin)
             touchBarController.reload()
         }
-    }
-
-    /// Which session to display: the user's pinned one if it is still in
-    /// the wire's session list, otherwise the most recently active.
-    /// Deliberately shared by the wire path and the 1.5s timer fallback —
-    /// previously the timer path called merge() without a displaySession,
-    /// so a pinned session (chosen in the picker) made the two paths pick
-    /// different sessions and the model pill flipped between them every
-    /// 1.5s (the "model pill flickers after switching model" report).
-    private func resolveDisplaySession(_ wire: HermesWireStatus) -> HermesWireSession? {
-        if let pin = pinnedSessionId,
-           let found = wire.sessions.first(where: { $0.id == pin }) {
-            return found
-        }
-        return wire.sessions.first ?? wire.session
     }
 
     /// HERMES_TB_DEBUG=1 — print which session/model each update path fed
@@ -314,64 +301,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     //   picker bar < 返回 tap → swap back to main
     // No NSMenu / NSPopoverTouchBarItem involved — it's all Touch Bar.
 
-    /// Build the `HermesStatus` the StateMachine sees. Tier A.2 makes the
-    /// Python feed the primary source for every field the StateMachine
-    /// cares about; StatusReader only fills gaps when the wire has died.
-    ///
-    /// Tier B: `displaySession` overrides the wire's "most recent" — it's
-    /// either the user-pinned session or the top of `wire.sessions`.
-    private func merge(wire: HermesWireStatus, sqlite: HermesStatus,
-                       displaySession: HermesWireSession? = nil) -> HermesStatus {
-        let picked = displaySession ?? wire.session
-        let sessionId = picked?.id ?? sqlite.activeSessionId
-        let source    = picked?.source ?? sqlite.activeSessionSource
-        let model     = picked?.model ?? sqlite.model
-        let title     = picked?.title ?? sqlite.activeSessionTitle
-
-        // Derive activity timestamps from the wire's recent messages.
-        let derived = HermesWireActivityTimestamps(from: wire.recentMessages)
-
-        // cron: "recently fired" = lastFiredAt within the StateMachine's
-        // cronWindow (10s). Wire timestamps are epoch seconds.
-        let cronRecently: Bool = {
-            guard let last = wire.cron.lastFiredAt else { return false }
-            return Date().timeIntervalSince1970 - last < 10
-        }()
-
-        // lastErrorMessage: from the wire's recent messages (most recent
-        // assistant message with finish_reason="error").
-        let lastError: Date? = derived.lastErrorAt
-
-        return HermesStatus(
-            now:                    Date(),
-            lastAssistantMessageAt: derived.lastAssistantAt ?? sqlite.lastAssistantMessageAt,
-            lastUserMessageAt:      derived.lastUserAt      ?? sqlite.lastUserMessageAt,
-            lastToolCallAt:         derived.lastToolAt      ?? sqlite.lastToolCallAt,
-            lastReasoningAt:        derived.lastReasoningAt ?? sqlite.lastReasoningAt,
-            lastFinishReason:       derived.lastFinishReason ?? sqlite.lastFinishReason,
-            // Tier A.3 — Hermes-authoritative state. Python derives a state
-            // for EVERY active session; we use the DISPLAY session's own
-            // state (pinned or most-recent) so the state pill follows what
-            // the user is looking at. Falls back to the legacy top-session
-            // wire.state when the display session has none. When absent the
-            // StateMachine uses its own time-window heuristics.
-            authoritativeState:     (displaySession?.state ?? wire.state)?.toHermesState(),
-            activeSessionId:        sessionId,
-            activeSessionSource:    source,
-            activeSessionModel:     model,
-            activeSessionTitle:     title,
-            model:                  model,
-            provider:               sqlite.provider,
-            contextTokens:          wire.contextTokens ?? sqlite.contextTokens,
-            contextMax:             wire.contextMax ?? sqlite.contextMax,
-            recentMessages:         [],
-            gatewayUp:              wire.gateway.running,
-            cronRecentlyFired:      cronRecently || sqlite.cronRecentlyFired,
-            waitingForApproval:     wire.approval.pending || sqlite.waitingForApproval,
-            lastErrorMessage:       lastError ?? sqlite.lastErrorMessage
-        )
-    }
-
+    /// Build the `HermesStatus` the StateMachine sees. Tier F 收口: the
+    /// shaping logic moved to `HermesStatusMerger` in the Domain package
+    /// (unit-testable without the app); this delegate just calls it.
     private func currentMergedSnapshot() -> HermesStatus {
         // If the wire is alive, build a merged snapshot using the last
         // known wire values for gateway/session/approval (so the timer
@@ -381,8 +313,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // If the wire has never delivered a frame (e.g. Python missing),
         // fall back to the most recent background StatusReader snapshot.
         if let wire = lastWire {
-            let merged = merge(wire: wire, sqlite: lastSqliteSnapshot ?? .empty,
-                               displaySession: resolveDisplaySession(wire))
+            let merged = HermesStatusMerger.merge(
+                wire: wire, sqlite: lastSqliteSnapshot ?? .empty,
+                displaySession: HermesStatusMerger.resolveDisplaySession(
+                    wire, pinnedSessionId: pinnedSessionId))
             debugModelTrace("timer", merged)
             return merged
         }
