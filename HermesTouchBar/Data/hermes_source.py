@@ -182,29 +182,34 @@ _TURN_START = re.compile(
 _TURN_END = re.compile(
     r"agent\.conversation_loop: Turn ended|tui_gateway\.server: tui turn finished"
 )
+# Session id appears as a bracket prefix ([20260916_172227_03a9ac]) on agent
+# events, or as agent_session_id=… on tui_gateway lines.
+_SID_BRACKET = re.compile(r"\[(\d{8}_\d{6}_[0-9a-f]+)\]")
+_SID_KEYWORD = re.compile(r"agent_session_id=(\d{8}_\d{6}_[0-9a-f]+)")
 
 
-def _read_agent_turn() -> tuple[float | None, float | None]:
-    """Scan the agent.log tail for the last turn START and END timestamps.
+def _read_agent_turns() -> dict[str, tuple[float | None, float | None]]:
+    """Scan the agent.log tail for the last turn START/END per session.
 
-    Returns (last_start_ts, last_end_ts) as epoch seconds, or (None, None)
-    when the log is missing/unreadable. Lines are time-ordered in the file,
-    so the last match of each kind is the most recent. A turn that started
-    but never ended (start > end, or end is None) means the agent is
-    mid-turn right now.
+    Returns {session_id: (last_start_ts, last_end_ts)}. Lines are
+    time-ordered in the file, so the last match of each kind is the most
+    recent. A session whose last turn START has no matching END (start is
+    not None and (end is None or start > end)) is mid-turn right now.
+
+    Turn events without a resolvable session id are skipped — attributing
+    them to the wrong session would flash another session's state.
     """
     log = HERMES_HOME / "logs" / "agent.log"
     if not log.exists():
-        return (None, None)
+        return {}
     try:
         size = log.stat().st_size
         with open(log, "rb") as f:
             f.seek(max(0, size - _AGENT_LOG_TAIL_BYTES))
             raw = f.read().decode("utf-8", "replace")
     except Exception:
-        return (None, None)
-    last_start: float | None = None
-    last_end: float | None = None
+        return {}
+    out: dict[str, list[float | None]] = {}
     for line in raw.splitlines():
         m = _LOG_TS.match(line)
         if not m:
@@ -215,11 +220,23 @@ def _read_agent_turn() -> tuple[float | None, float | None]:
             ) + int(m.group(3)) / 1000.0
         except (ValueError, OverflowError):
             continue
-        if _TURN_START.search(line):
-            last_start = ts
-        elif _TURN_END.search(line):
-            last_end = ts
-    return (last_start, last_end)
+        is_start = _TURN_START.search(line) is not None
+        is_end = _TURN_END.search(line) is not None
+        if not (is_start or is_end):
+            continue
+        bm = _SID_BRACKET.search(line)
+        sid = bm.group(1) if bm else None
+        if sid is None:
+            km = _SID_KEYWORD.search(line)
+            sid = km.group(1) if km else None
+        if sid is None:
+            continue
+        entry = out.setdefault(sid, [None, None])
+        if is_start:
+            entry[0] = ts
+        else:
+            entry[1] = ts
+    return {k: (v[0], v[1]) for k, v in out.items()}
 
 
 def _derive_state(
@@ -482,16 +499,62 @@ def _collect() -> dict[str, Any]:
                     }
                     sid = top.get("id")
                     if sid:
-                        # latest=True is CRITICAL: get_messages defaults to
-                        # insertion order from the START (oldest 5 messages),
-                        # which made the derived activity timestamps forever
-                        # stale → StateMachine always evaluated .ready.
-                        # latest=True pages back from the newest message and
-                        # still returns chronologically ordered rows, so the
-                        # "last processed = newest" rule in HermesWireActivity
-                        # keeps working.
-                        tail = db.get_messages(sid, limit=5, latest=True) or []
-                        for m in tail:
+                        # Tier A.3 / session linkage — PER-SESSION
+                        # authoritative state. Every active session gets its
+                        # own derived state (tail + live heartbeat + its own
+                        # mid-turn marker from agent.log), so Swift can pin
+                        # one session while another is busy and the state
+                        # pill follows what the user is looking at instead of
+                        # always mirroring the most-recent session.
+                        turns = _read_agent_turns()
+                        top_tail: list[dict[str, Any]] = []
+                        top_in_turn = False
+                        top_turn_start: float | None = None
+                        for s in merged:
+                            s_sid = s.get("id")
+                            if not s_sid:
+                                continue
+                            # latest=True is CRITICAL: get_messages defaults
+                            # to insertion order from the START (oldest 5
+                            # messages), which made the derived activity
+                            # timestamps forever stale → StateMachine always
+                            # evaluated .ready. latest=True pages back from
+                            # the newest message and still returns
+                            # chronologically ordered rows, so the "last
+                            # processed = newest" rule keeps working.
+                            s_tail = db.get_messages(s_sid, limit=5, latest=True) or []
+                            if s_sid == sid:
+                                top_tail = s_tail
+                            # Hotfix #2: plain-text replies write no DB rows
+                            # while streaming, so the tail alone reads
+                            # "ready" for the whole generation. agent.log's
+                            # turn START/END markers tell us this session is
+                            # mid-turn.
+                            turn_start, turn_end = turns.get(s_sid, (None, None))
+                            in_turn = (
+                                turn_start is not None
+                                and (turn_end is None or turn_start > turn_end)
+                                # Stale guard: a start with no end is only
+                                # meaningful while recent; if the log rotated
+                                # or Hermes died mid-turn, fall back to the
+                                # message/heartbeat logic.
+                                and (time.time() - turn_start) < 3600.0
+                            )
+                            s["state"] = _derive_state(
+                                s_tail,
+                                s.get("last_activity_at"),
+                                time.time(),
+                                True,
+                                in_turn=in_turn,
+                            )
+                            if s_sid == sid:
+                                top_in_turn = in_turn
+                                top_turn_start = turn_start
+                        # recent_messages stays the TOP session's tail — it
+                        # feeds Swift's local time-window heuristics for the
+                        # not-yet-authoritative fields; per-session state is
+                        # in sessions[i].state.
+                        for m in top_tail:
                             recent_messages.append({
                                 "role": m.get("role"),
                                 "timestamp": m.get("timestamp"),
@@ -502,35 +565,12 @@ def _collect() -> dict[str, Any]:
                                     and m.get("role") == "assistant"
                                 ),
                             })
-                        # Tier A.3 — authoritative state derived from the
-                        # session tail + live heartbeat + mid-turn marker.
-                        # `tail` holds the FULL message rows (incl.
-                        # tool_calls / reasoning), so no extra query is
-                        # needed.
-                        # Hotfix #2: plain-text replies write no DB rows
-                        # while streaming, so the tail alone reads "ready"
-                        # for the whole generation. agent.log's turn
-                        # START/END markers tell us Hermes is mid-turn.
-                        turn_start, turn_end = _read_agent_turn()
-                        in_turn = (
-                            turn_start is not None
-                            and (turn_end is None or turn_start > turn_end)
-                            # Stale guard: a start with no end is only
-                            # meaningful while recent; if the log rotated
-                            # or Hermes died mid-turn, fall back to the
-                            # message/heartbeat logic.
-                            and (time.time() - turn_start) < 3600.0
-                        )
-                        derived_state = _derive_state(
-                            tail,
-                            top.get("last_activity_at"),
-                            time.time(),
-                            True,
-                            in_turn=in_turn,
-                        )
+                        # wire.state = top session's state (back-compat field;
+                        # Swift prefers displaySession.state when they differ).
+                        derived_state = top.get("state")
                         agent_turn = {
-                            "in_turn": in_turn,
-                            "started_at": turn_start,
+                            "in_turn": top_in_turn,
+                            "started_at": top_turn_start,
                         }
                         # Context usage — Hermes exposes no persisted "current
                         # window" counter (sessions.input_tokens is CUMULATIVE

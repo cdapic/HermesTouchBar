@@ -64,9 +64,15 @@ struct HermesWireSession: Codable {
     /// "评审Matrix看板widget方案"; gateway sessions may be empty). The picker
     /// falls back to `source (id)` when nil/empty.
     let title: String?
+    /// Per-session authoritative state (session linkage). Python derives a
+    /// state for EVERY active session; when the user pins one, Swift uses
+    /// THIS session's state so the state pill follows what the user is
+    /// looking at. Nil when the frame predates the field or the session has
+    /// no derivable state.
+    let state: HermesWireState?
 
     enum CodingKeys: String, CodingKey {
-        case id, source, model, title
+        case id, source, model, title, state
         case startedAt = "started_at"
         case lastActive = "last_active"
     }

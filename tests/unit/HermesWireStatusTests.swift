@@ -31,7 +31,7 @@ final class HermesWireStatusTests: XCTestCase {
 
         // 2) Full frame: gateway up, session present, with all Tier A.2 + B fields.
         let full = """
-        {"v":1,"ts":1789440715.535,"gateway":{"running":true,"manager":"launchd","pids":[5965,5730]},"session":{"id":"20260710_093922_c6096a66","source":"feishu","model":"MiniMax-M3","started_at":1783647562.260,"last_active":1783647582.874},"sessions":[{"id":"20260710_093922_c6096a66","source":"feishu","model":"MiniMax-M3","started_at":1783647562.260,"last_active":1783647582.874},{"id":"20260710_093922_deadbeef","source":"tui","model":"MiniMax-M3","started_at":1783647000.0,"last_active":1783647500.0}],"session_count":2,"state":null,"approval":{"pending":true,"prompt":"(Y/n)","tool":"shell_exec"},"cron":{"last_fired_at":1789440700.0,"recent_job_id":"morning"},"skin":"slate","recent_messages":[{"role":"assistant","timestamp":1783647576.45,"tool_name":null,"finish_reason":"tool_calls","is_reasoning":true},{"role":"tool","timestamp":1783647580.08,"tool_name":"terminal","finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":1783647582.81,"tool_name":null,"finish_reason":"stop","is_reasoning":false}]}
+        {"v":1,"ts":1789440715.535,"gateway":{"running":true,"manager":"launchd","pids":[5965,5730]},"session":{"id":"20260710_093922_c6096a66","source":"feishu","model":"MiniMax-M3","started_at":1783647562.260,"last_active":1783647582.874},"sessions":[{"id":"20260710_093922_c6096a66","source":"feishu","model":"MiniMax-M3","started_at":1783647562.260,"last_active":1783647582.874,"state":"working"},{"id":"20260710_093922_deadbeef","source":"tui","model":"MiniMax-M3","started_at":1783647000.0,"last_active":1783647500.0,"state":"ready"}],"session_count":2,"state":null,"approval":{"pending":true,"prompt":"(Y/n)","tool":"shell_exec"},"cron":{"last_fired_at":1789440700.0,"recent_job_id":"morning"},"skin":"slate","recent_messages":[{"role":"assistant","timestamp":1783647576.45,"tool_name":null,"finish_reason":"tool_calls","is_reasoning":true},{"role":"tool","timestamp":1783647580.08,"tool_name":"terminal","finish_reason":null,"is_reasoning":false},{"role":"assistant","timestamp":1783647582.81,"tool_name":null,"finish_reason":"stop","is_reasoning":false}]}
         """
         do {
             let wire = try HermesPythonSource.decoder.decode(
@@ -60,6 +60,12 @@ final class HermesWireStatusTests: XCTestCase {
             XCTAssertEqual(wire.sessionCount, 2, "decode full: session_count == 2")
             XCTAssertEqual(wire.sessions.first?.source, "feishu", "decode full: first session is feishu")
             XCTAssertEqual(wire.sessions[1].source, "tui", "decode full: second session is tui")
+            XCTAssertEqual(wire.sessions.first?.state, .working,
+                "decode full: first session has per-session state working")
+            XCTAssertEqual(wire.sessions[1].state, .ready,
+                "decode full: second session has per-session state ready")
+            XCTAssertNil(wire.session?.state,
+                "decode full: legacy session.state nil (field absent)")
         } catch {
             XCTFail("decode full: \(error)")
         }

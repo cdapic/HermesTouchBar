@@ -115,13 +115,15 @@ check(
 # 17. user last + NOT mid-turn → ready (regression guard)
 check("user last + no in_turn → ready", derive([msg("user", NOW - 5)], in_turn=False), "ready")
 
-print("== _read_agent_turn — synthetic agent.log ==")
+print("== _read_agent_turns — synthetic agent.log (per-session) ==")
 
 LOG = Path(TMP) / "logs" / "agent.log"
 LOG.parent.mkdir(parents=True, exist_ok=True)
 T = time.strptime("2026-09-16 17:41:21", "%Y-%m-%d %H:%M:%S")
 START_TS = time.mktime(T) + 0.595
 END_TS = time.mktime(time.strptime("2026-09-16 17:41:39", "%Y-%m-%d %H:%M:%S")) + 0.637
+SID_A = "20260916_172227_03a9ac"
+SID_B = "20260916_171500_deadbeef"
 
 
 def stamp(ts: float) -> str:
@@ -130,35 +132,74 @@ def stamp(ts: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", lt) + f",{ms:03d}"
 
 
-# a) no log → (None, None)
+# a) no log → {}
 if LOG.exists():
     LOG.unlink()
-check("missing log → (None, None)", hs._read_agent_turn(), (None, None))
+check("missing log → {}", hs._read_agent_turns(), {})
 
-# b) turn start only → start set, end None
+# b) turn start only (bracket sid) → {sid: (ts, None)}
 LOG.write_text(
     stamp(START_TS)
-    + " INFO [20260916_172227_03a9ac] agent.turn_context: conversation turn: session=… msg='hi'\n",
+    + f" INFO [{SID_A}] agent.turn_context: conversation turn: session=… msg='hi'\n",
     encoding="utf-8",
 )
-s, e = hs._read_agent_turn()
-check("start only → (ts, None)", (s is not None and abs(s - START_TS) < 0.01, e), (True, None))
+turns = hs._read_agent_turns()
+s, e = turns.get(SID_A, (None, None))
+check("start only (bracket sid) → (ts, None)",
+      (SID_A in turns, s is not None and abs(s - START_TS) < 0.01, e),
+      (True, True, None))
 
 # c) start then end → both set, end later
 LOG.write_text(
     stamp(START_TS)
-    + " INFO [20260916_172227_03a9ac] agent.turn_context: conversation turn: …\n"
+    + f" INFO [{SID_A}] agent.turn_context: conversation turn: …\n"
     + stamp(END_TS)
-    + " INFO [20260916_172227_03a9ac] agent.conversation_loop: Turn ended: reason=text_response(finish_reason=stop) …\n",
+    + f" INFO [{SID_A}] agent.conversation_loop: Turn ended: reason=text_response(finish_reason=stop) …\n",
     encoding="utf-8",
 )
-s, e = hs._read_agent_turn()
-check("start+end → both set, end later", (abs(s - START_TS) < 0.01, abs(e - END_TS) < 0.01, e > s), (True, True, True))
+turns = hs._read_agent_turns()
+s, e = turns.get(SID_A, (None, None))
+check("start+end → both set, end later",
+      (SID_A in turns, abs(s - START_TS) < 0.01, abs(e - END_TS) < 0.01, e > s),
+      (True, True, True, True))
 
-# d) garbage lines ignored
-LOG.write_text("not a log line\n\n" + stamp(START_TS) + " INFO tui_gateway.server: tui prompt accepted: …\n", encoding="utf-8")
-s, e = hs._read_agent_turn()
-check("garbage ignored, prompt accepted counts as start", (s is not None, e), (True, None))
+# d) tui prompt accepted uses agent_session_id= keyword; garbage ignored
+LOG.write_text(
+    "not a log line\n\n"
+    + stamp(START_TS)
+    + f" INFO tui_gateway.server: tui prompt accepted: ui_session=ab944edf session_key=202609...a9ac agent_session_id={SID_A} kind=user chars=27\n",
+    encoding="utf-8",
+)
+turns = hs._read_agent_turns()
+s, e = turns.get(SID_A, (None, None))
+check("garbage ignored, prompt accepted (keyword sid) counts as start",
+      (SID_A in turns, s is not None and abs(s - START_TS) < 0.01, e),
+      (True, True, None))
+
+# e) two sessions stay independent — A mid-turn, B finished
+LOG.write_text(
+    stamp(START_TS)
+    + f" INFO [{SID_A}] agent.turn_context: conversation turn: …\n"
+    + stamp(START_TS + 5)
+    + f" INFO [{SID_B}] agent.turn_context: conversation turn: …\n"
+    + stamp(START_TS + 7)
+    + f" INFO [{SID_B}] agent.conversation_loop: Turn ended: …\n",
+    encoding="utf-8",
+)
+turns = hs._read_agent_turns()
+sa, ea = turns.get(SID_A, (None, None))
+sb, eb = turns.get(SID_B, (None, None))
+check("two sessions independent (A mid-turn, B done)",
+      (sa is not None and ea is None, sb is not None and eb is not None),
+      (True, True))
+
+# f) turn event with NO resolvable session id is skipped
+LOG.write_text(
+    stamp(START_TS)
+    + " INFO agent.conversation_loop: Turn ended: … (no sid anywhere)\n",
+    encoding="utf-8",
+)
+check("sid-less turn events skipped", hs._read_agent_turns(), {})
 
 print(f"\n== {total - failed}/{total} passed, {failed} failed ==")
 sys.exit(1 if failed else 0)

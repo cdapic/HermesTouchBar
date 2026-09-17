@@ -36,6 +36,9 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     // (the picker bar). The picker bar has a back button + one
     // button per active session. See NSTouchBarCatalog "Color" sample.
     private let idPickerBack     = NSTouchBarItem.Identifier("hermes.picker.back")
+    /// "自动跟随最新" — the escape hatch from a pinned session back to
+    /// auto-follow mode (picks nil → AppDelegate clears pinnedSessionId).
+    private let idPickerAuto     = NSTouchBarItem.Identifier("hermes.picker.auto")
     private let pickerSessionPrefix = "hermes.picker.session."
     private let pickerMaxItems = 8
     private func pickerSessionID(_ sessionID: String) -> NSTouchBarItem.Identifier {
@@ -184,7 +187,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     func presentSessionPicker() {
         let bar = makePickerBar()
         let sessions = popoverSessions
-        var ids: [NSTouchBarItem.Identifier] = [idPickerBack]
+        var ids: [NSTouchBarItem.Identifier] = [idPickerBack, idPickerAuto]
         for s in sessions.prefix(pickerMaxItems) {
             if let sid = s.id {
                 ids.append(pickerSessionID(sid))
@@ -353,6 +356,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             // Picker-bar items take precedence (different bar, same delegate).
             if touchBar === pickerBar {
                 if identifier == idPickerBack { return makePickerBack() }
+                if identifier == idPickerAuto { return makePickerAuto() }
                 if identifier.rawValue.hasPrefix(pickerSessionPrefix) {
                     let sid = String(identifier.rawValue.dropFirst(pickerSessionPrefix.count))
                     return makePickerSessionButton(sessionID: sid)
@@ -386,6 +390,19 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             title: "< 返回",
             target: self,
             action: #selector(pickerBackTapped)
+        )
+        styleButtonItem(item)
+        return item
+    }
+
+    /// First picker entry after < 返回: opt back into auto-follow. Picks
+    /// `nil`, which AppDelegate treats as "clear the pinned session".
+    private func makePickerAuto() -> NSTouchBarItem {
+        let item = NSButtonTouchBarItem(
+            identifier: idPickerAuto,
+            title: "⚡ 自动跟随最新",
+            target: self,
+            action: #selector(pickerAutoTapped)
         )
         styleButtonItem(item)
         return item
@@ -430,6 +447,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
 
     @objc private func pickerBackTapped() {
         onBackToMain?()
+    }
+
+    @objc private func pickerAutoTapped() {
+        onSessionPick?(nil)
     }
 
     @objc private func pickerSessionTapped(_ sender: NSButtonTouchBarItem) {
