@@ -1,12 +1,20 @@
 # HermesTouchBar
 
-把 Hermes Agent 的运行状态实时投影到 MacBook Touch Bar —— 不抢占系统控制条，任意前台 App 下都常驻可见。
+**让 AI Agent 一直在你的视野里，但不要打断你。**
+
+HermesTouchBar 把 Hermes Agent 的运行状态实时投影到 MacBook Touch Bar —— 不抢占系统控制条，任意前台 App 下都常驻可见。Agent 在后台干活，你干你的活，一瞥就知道它是在思考、在工作、还是等你审批。
 
 [![macOS](https://img.shields.io/badge/macOS-13.0+-blue)](https://developer.apple.com/macos/)
 [![Platform](https://img.shields.io/badge/Platform-MacBook%20Pro%20with%20Touch%20Bar-lightgrey)](#功能特性)
 
 > 适配硬件：MacBookPro16,1（2019 16 寸 Intel MacBook Pro，带 Touch Bar）
 > 依赖：Hermes Agent（`~/.hermes`）+ Python 3
+
+---
+
+## 它解决什么问题
+
+AI agent 干活时，你常处于"它在后台跑、你忙自己的"状态。但你看不见它在干嘛：是卡住了、在等审批、还是马上要给你结果？HermesTouchBar 把这块信息放到你余光能瞄到的地方——不用切窗口，不打断手头的事。它不抢你的注意力，只在需要你出手（比如高风险操作审批）时才闪烁提醒。
 
 ---
 
@@ -93,24 +101,20 @@ macOS 公共 `NSTouchBar` API 只在前台 App 自己的窗口有焦点时渲染
 
 ```
 HermesTouchBar/
-├── HermesTouchBar/                  # 源码
+├── HermesTouchBar/                  # App 壳（UI + 数据源）
 │   ├── AppDelegate.swift            # 数据流编排 + 状态机驱动
 │   ├── TouchBarController.swift     # Touch Bar 装配、drilldown、系统模态挂载
-│   ├── Models/
-│   │   ├── HermesStatus.swift       # 状态机输入
-│   │   ├── HermesState.swift        # 9 状态枚举 + 颜色映射
-│   │   ├── HermesWireStatus.swift   # wire schema v1
-│   │   └── HermesWireActivity.swift # 从最近消息派生活动时间戳
-│   ├── Skin/SkinProvider.swift      # 内置皮肤 + 用户 YAML + 热重载
 │   ├── Data/
 │   │   ├── HermesPythonSource.swift # Python 子进程 + AsyncStream
 │   │   └── hermes_source.py         # Hermes 运行时内省，输出 JSON-lines
 │   ├── QuickActions/QuickActions.swift  # 5 个全局快捷键（Carbon）
 │   ├── TouchBarPrivate/             # 私有 DFRFoundation 桥
 │   └── Status/                      # SQLite 兜底读取 + 状态机
+├── Domain/                          # 纯逻辑 SwiftPM 包（HermesDomain）
+│   └── Sources/HermesDomain/        # 状态模型 / wire schema / 状态机 / 皮肤
 ├── screenshot/                      # 实机截图
 ├── scripts/                         # build.sh / test.sh
-└── tests/                           # standalone smoke 测试
+└── tests/                           # standalone smoke + XCTest
 ```
 
 > 无 `.xcodeproj`：构建走 `scripts/build.sh`（swiftc 直接编译），`project.yml` 为 XcodeGen 备用模板。
@@ -123,7 +127,7 @@ HermesTouchBar/
 ./scripts/test.sh
 ```
 
-133 项 smoke 断言，覆盖皮肤解析、状态机边界、wire schema 解码，全部独立编译运行、零外部依赖。
+swiftc smoke 145 项断言 + Python 23 项 + XCTest 4 套件，覆盖皮肤解析、状态机边界、wire schema 解码、状态合并逻辑，全部独立编译运行、零外部依赖。
 
 ---
 
